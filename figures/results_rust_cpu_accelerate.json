@@ -1,0 +1,1 @@
+{"rust_cpu_accelerate":{"mean_ms":75.2,"min_ms":74.8,"max_ms":75.9,"std_ms":0.4,"n_runs":5,"output_shape":[1,20484,100]}}
