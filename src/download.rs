@@ -13,7 +13,7 @@
 //! use tribev2::download::{DownloadConfig, download_model};
 //!
 //! let cfg = DownloadConfig {
-//!     repo: "facebook/tribev2".into(),
+//!     repo: "eugenehp/tribev2".into(),
 //!     output_dir: "./weights".into(),
 //!     token: None,       // or Some("hf_...".into()) for private repos
 //!     overwrite: false,
@@ -31,7 +31,7 @@ use hf_hub::api::sync::{Api, ApiBuilder, ApiRepo, ApiError};
 /// Configuration for a model download.
 #[derive(Debug, Clone)]
 pub struct DownloadConfig {
-    /// HuggingFace repo ID, e.g. `"facebook/tribev2"`.
+    /// HuggingFace repo ID, e.g. `"eugenehp/tribev2"`.
     pub repo: String,
     /// Local directory to copy files into.
     pub output_dir: PathBuf,
@@ -44,7 +44,7 @@ pub struct DownloadConfig {
 impl Default for DownloadConfig {
     fn default() -> Self {
         Self {
-            repo: "facebook/tribev2".into(),
+            repo: "eugenehp/tribev2".into(),
             output_dir: PathBuf::from("./weights"),
             token: None,
             overwrite: false,

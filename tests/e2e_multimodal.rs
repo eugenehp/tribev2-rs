@@ -4,12 +4,10 @@
 //! (text + audio + video), runs segmented inference, and produces brain maps + PNG.
 
 use std::collections::BTreeMap;
-use tribev2_rs::config::*;
-use tribev2_rs::model::tribe::TribeV2;
-use tribev2_rs::tensor::Tensor;
-use tribev2_rs::weights::{WeightMap, load_weights};
-use tribev2_rs::segments::{SegmentConfig, predict_segmented};
-use tribev2_rs::plotting;
+use tribev2::model::tribe::TribeV2;
+use tribev2::tensor::Tensor;
+use tribev2::segments::{SegmentConfig, predict_segmented};
+use tribev2::plotting;
 
 const DATA_DIR: &str = "/Users/Shared/tribev2-rs/data";
 
@@ -198,7 +196,7 @@ fn test_e2e_multimodal_inference() {
     let t3 = std::time::Instant::now();
 
     // Load real fsaverage5 mesh (10242 vertices per hemisphere = 20484 total)
-    let brain = tribev2_rs::fsaverage::load_fsaverage(
+    let brain = tribev2::fsaverage::load_fsaverage(
         "fsaverage5", "half", "sulcal",
         Some(DATA_DIR),
     ).expect("failed to load fsaverage5 — ensure data/fsaverage5/surf/ exists");

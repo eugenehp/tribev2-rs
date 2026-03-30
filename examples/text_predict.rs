@@ -4,9 +4,9 @@
 //! inference with synthetic text features.
 
 use std::collections::BTreeMap;
-use tribev2_rs::config::{BrainModelConfig, EncoderConfig, ModalityDims, SubjectLayersConfig};
-use tribev2_rs::model::tribe::TribeV2;
-use tribev2_rs::tensor::Tensor;
+use tribev2::config::{BrainModelConfig, EncoderConfig, ModalityDims, SubjectLayersConfig};
+use tribev2::model::tribe::TribeV2;
+use tribev2::tensor::Tensor;
 
 fn main() -> anyhow::Result<()> {
     println!("TRIBE v2 — Text Prediction Example");

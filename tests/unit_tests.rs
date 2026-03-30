@@ -2,13 +2,13 @@
 //! plotting, events, features, segments, and fsaverage modules.
 
 use std::collections::BTreeMap;
-use tribev2_rs::config::*;
-use tribev2_rs::model::tribe::TribeV2;
-use tribev2_rs::tensor::Tensor;
-use tribev2_rs::plotting;
-use tribev2_rs::segments;
-use tribev2_rs::events;
-use tribev2_rs::features;
+use tribev2::config::*;
+use tribev2::model::tribe::TribeV2;
+use tribev2::tensor::Tensor;
+use tribev2::plotting;
+use tribev2::segments;
+use tribev2::events;
+use tribev2::features;
 
 // ── Config ────────────────────────────────────────────────────────────────
 
@@ -392,10 +392,7 @@ fn test_plot_view_from_str() {
 #[test]
 fn test_plot_colormap_range() {
     for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
-        let (r, g, b) = plotting::ColorMap::Hot.map(t);
-        assert!(r <= 255);
-        assert!(g <= 255);
-        assert!(b <= 255);
+        let (_r, _g, _b): (u8, u8, u8) = plotting::ColorMap::Hot.map(t);
     }
 }
 
@@ -453,9 +450,7 @@ fn test_plot_rainbow_brain() {
     let coords: Vec<f32> = (0..30).map(|i| i as f32 * 0.1).collect();
     let colors = plotting::rainbow_brain(&coords, 10);
     assert_eq!(colors.len(), 10);
-    for (r, g, b) in &colors {
-        assert!(*r <= 255 && *g <= 255 && *b <= 255);
-    }
+    for &(_r, _g, _b) in &colors {}
 }
 
 #[test]
@@ -475,9 +470,9 @@ fn test_plot_tight_crop() {
 
 #[test]
 fn test_fsaverage_sizes() {
-    assert_eq!(tribev2_rs::fsaverage::fsaverage_size("fsaverage5"), Some(10242));
-    assert_eq!(tribev2_rs::fsaverage::fsaverage_size("fsaverage3"), Some(642));
-    assert_eq!(tribev2_rs::fsaverage::fsaverage_size("nope"), None);
+    assert_eq!(tribev2::fsaverage::fsaverage_size("fsaverage5"), Some(10242));
+    assert_eq!(tribev2::fsaverage::fsaverage_size("fsaverage3"), Some(642));
+    assert_eq!(tribev2::fsaverage::fsaverage_size("nope"), None);
 }
 
 // ── Weights ───────────────────────────────────────────────────────────────
@@ -485,7 +480,7 @@ fn test_fsaverage_sizes() {
 #[test]
 fn test_weight_map_try_take() {
     // Empty map
-    let mut wm = tribev2_rs::WeightMap {
+    let mut wm = tribev2::WeightMap {
         tensors: std::collections::HashMap::new(),
     };
     assert!(wm.try_take("nonexistent").is_none());

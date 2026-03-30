@@ -84,6 +84,11 @@ struct Args {
     #[arg(long)]
     n_layers: Option<usize>,
 
+    /// Subject index for per-subject prediction (0-indexed).
+    /// If not specified, predictions are averaged across all subjects.
+    #[arg(long)]
+    subject: Option<usize>,
+
     /// Enable segment-based batching
     #[arg(long)]
     segment: bool,
@@ -197,9 +202,11 @@ fn main() -> Result<()> {
     let mut config: TribeV2Config = serde_yaml::from_str(&config_str)
         .with_context(|| "failed to parse config.yaml")?;
 
-    // Set average_subjects for inference
-    if let Some(ref mut sl) = config.brain_model_config.subject_layers {
-        sl.average_subjects = true;
+    // Set average_subjects for inference when no specific subject is requested
+    if args.subject.is_none() {
+        if let Some(ref mut sl) = config.brain_model_config.subject_layers {
+            sl.average_subjects = true;
+        }
     }
 
     if args.verbose {
@@ -217,11 +224,17 @@ fn main() -> Result<()> {
     } else {
         ModalityDims::pretrained()
     };
-    let n_outputs = 20484;
+    let n_outputs = if let Some(ref ba_path) = args.build_args {
+        tribev2::ModelBuildArgs::from_json(ba_path)
+            .map(|ba| ba.n_outputs)
+            .unwrap_or(20484)
+    } else {
+        20484
+    };
     let n_output_timesteps = config.data.duration_trs;
 
     let mut model = TribeV2::new(
-        feature_dims,
+        feature_dims.clone(),
         n_outputs,
         n_output_timesteps,
         &config.brain_model_config,
@@ -289,7 +302,8 @@ fn main() -> Result<()> {
 
     } else if let Some(ref path) = args.text_features {
         eprintln!("Loading pre-extracted text features...");
-        let n_l = args.n_layers.unwrap_or(3);
+        // Pretrained model: 2 layer groups × 3072 dim = 6144
+        let n_l = args.n_layers.unwrap_or(2);
         let dim = args.feature_dim.unwrap_or(3072);
         let t = load_preextracted_features(path, n_l, dim, n_timesteps)?;
         features.insert("text".to_string(), t);
@@ -298,7 +312,8 @@ fn main() -> Result<()> {
     // Audio features
     if let Some(ref path) = args.audio_features {
         eprintln!("Loading pre-extracted audio features...");
-        let n_l = args.n_layers.unwrap_or(3);
+        // Pretrained model: 2 layer groups × 1024 dim = 2048
+        let n_l = args.n_layers.unwrap_or(2);
         let dim = args.feature_dim.unwrap_or(1024);
         let t = load_preextracted_features(path, n_l, dim, n_timesteps)?;
         features.insert("audio".to_string(), t);
@@ -307,24 +322,22 @@ fn main() -> Result<()> {
     // Video features
     if let Some(ref path) = args.video_features {
         eprintln!("Loading pre-extracted video features...");
-        let n_l = args.n_layers.unwrap_or(3);
+        // Pretrained model: 2 layer groups × 1408 dim = 2816
+        let n_l = args.n_layers.unwrap_or(2);
         let dim = args.feature_dim.unwrap_or(1408);
         let t = load_preextracted_features(path, n_l, dim, n_timesteps)?;
         features.insert("video".to_string(), t);
     }
 
-    // Fill missing modalities with zeros
-    let modality_specs: Vec<(&str, usize, usize)> = vec![
-        ("text", 3, 3072),
-        ("audio", 3, 1024),
-        ("video", 3, 1408),
-    ];
-    for (name, n_l, dim) in &modality_specs {
-        if !features.contains_key(*name) {
-            features.insert(
-                name.to_string(),
-                Tensor::zeros(&[1, n_l * dim, n_timesteps]),
-            );
+    // Fill missing modalities with zeros using build_args dims (or pretrained defaults)
+    for md in &feature_dims {
+        if !features.contains_key(&md.name) {
+            if let Some((n_l, dim)) = md.dims {
+                features.insert(
+                    md.name.clone(),
+                    Tensor::zeros(&[1, n_l * dim, n_timesteps]),
+                );
+            }
         }
     }
 
@@ -340,6 +353,8 @@ fn main() -> Result<()> {
     let predictions: Vec<Vec<f32>>;
     let n_pred_timesteps: usize;
 
+    let subject_ids: Option<Vec<usize>> = args.subject.map(|s| vec![s]);
+
     if args.segment {
         // Segment-based inference
         let seg_config = SegmentConfig {
@@ -351,6 +366,8 @@ fn main() -> Result<()> {
             stride_drop_incomplete: false,
         };
 
+        // TODO: per-subject segmented inference (currently averages subjects)
+        let _ = &subject_ids;
         let result = segments::predict_segmented(&model, &features, &seg_config);
         eprintln!(
             "Segments: {} total TRs, {} kept ({:.1}%)",
@@ -362,7 +379,7 @@ fn main() -> Result<()> {
         n_pred_timesteps = predictions.len();
     } else {
         // Single forward pass
-        let output = model.forward(&features, None, true);
+        let output = model.forward(&features, subject_ids.as_deref(), true);
         // output: [1, n_outputs, n_output_timesteps]
         let n_out = output.shape[1];
         let n_t = output.shape[2];

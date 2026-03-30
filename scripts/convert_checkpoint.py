@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """Convert a TRIBE v2 PyTorch Lightning checkpoint to safetensors.
 
+Requires Python 3.9+ (uses str.removeprefix), torch, and safetensors:
+    pip install torch safetensors
+
 Usage:
     python3 scripts/convert_checkpoint.py best.ckpt model.safetensors
+
+Outputs:
+    model.safetensors          — weights for the Rust crate
+    model_build_args.json      — feature_dims, n_outputs, n_output_timesteps
 
 This extracts the state_dict from the .ckpt file, strips the 'model.' prefix,
 and saves in safetensors format for loading by the Rust crate.

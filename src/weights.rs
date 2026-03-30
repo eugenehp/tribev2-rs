@@ -4,32 +4,36 @@
 //! - `state_dict`: model weights with prefix `model.`
 //! - `model_build_args`: dict with feature_dims, n_outputs, n_output_timesteps
 //!
-//! State dict keys for the pretrained model:
+//! State dict keys for the pretrained model (after `model.` prefix is stripped):
 //! ```text
-//! model.projectors.text.0.weight          [384, 9216]
-//! model.projectors.text.0.bias            [384]
-//! model.projectors.audio.0.weight         [384, 3072]
-//! model.projectors.audio.0.bias           [384]
-//! model.projectors.video.0.weight         [384, 4224]
-//! model.projectors.video.0.bias           [384]
-//! model.time_pos_embed                    [1, 1024, 1152]
-//! model.encoder.layers.{i}.0.0.g          [1]           (ScaleNorm pre-norm)
-//! model.encoder.layers.{i}.1.to_q.weight  [1152, 1152]  (Attention Q)
-//! model.encoder.layers.{i}.1.to_k.weight  [1152, 1152]  (Attention K)
-//! model.encoder.layers.{i}.1.to_v.weight  [1152, 1152]  (Attention V)
-//! model.encoder.layers.{i}.1.to_out.weight [1152, 1152] (Attention output)
-//! model.encoder.layers.{i}.2.residual_scale [1152]      (Residual scale)
-//! model.encoder.layers.{j}.0.0.g          [1]           (ScaleNorm pre-norm for FF)
-//! model.encoder.layers.{j}.1.ff.0.0.weight [4608, 1152] (FF linear 1)
-//! model.encoder.layers.{j}.1.ff.0.0.bias   [4608]       (FF bias 1)
-//! model.encoder.layers.{j}.1.ff.2.weight   [1152, 4608] (FF linear 2)
-//! model.encoder.layers.{j}.1.ff.2.bias     [1152]       (FF bias 2)
-//! model.encoder.layers.{j}.2.residual_scale [1152]
-//! model.encoder.final_norm.g              [1]
-//! model.low_rank_head.weight              [2048, 1152]
-//! model.predictor.weights                 [26, 2048, 20484]
-//! model.predictor.bias                    [26, 20484]
+//! projectors.text.weight              [384, 6144]   (2 layers × 3072 dim)
+//! projectors.text.bias                [384]
+//! projectors.audio.weight             [384, 2048]   (2 layers × 1024 dim)
+//! projectors.audio.bias               [384]
+//! projectors.video.weight             [384, 2816]   (2 layers × 1408 dim)
+//! projectors.video.bias               [384]
+//! time_pos_embed                      [1, 1024, 1152]
+//! encoder.rotary_pos_emb.inv_freq     [36]          (buffer, recomputed — consumed but not used)
+//! encoder.layers.{i}.0.0.g           [1]            (ScaleNorm pre-norm; i=0,2,4,...14 = attn)
+//! encoder.layers.{i}.1.to_q.weight   [1152, 1152]
+//! encoder.layers.{i}.1.to_k.weight   [1152, 1152]
+//! encoder.layers.{i}.1.to_v.weight   [1152, 1152]
+//! encoder.layers.{i}.1.to_out.weight [1152, 1152]
+//! encoder.layers.{i}.2.residual_scale [1152]
+//! encoder.layers.{j}.0.0.g           [1]            (ScaleNorm pre-norm; j=1,3,5,...15 = FF)
+//! encoder.layers.{j}.1.ff.0.0.weight [4608, 1152]
+//! encoder.layers.{j}.1.ff.0.0.bias   [4608]
+//! encoder.layers.{j}.1.ff.2.weight   [1152, 4608]
+//! encoder.layers.{j}.1.ff.2.bias     [1152]
+//! encoder.layers.{j}.2.residual_scale [1152]
+//! encoder.final_norm.g               [1]
+//! low_rank_head.weight               [2048, 1152]
+//! predictor.weights                  [n_subjects, 2048, 20484]
+//! predictor.bias                     [n_subjects, 20484]
 //! ```
+//!
+//! Note: the released public checkpoint has `n_subjects=1`. The key names have
+//! no `.0.` infix (unlike older checkpoints); the loader tries both forms.
 
 use std::collections::HashMap;
 use crate::tensor::Tensor;
@@ -94,14 +98,17 @@ impl WeightMap {
     }
 }
 
-/// Load a PyTorch Lightning checkpoint (.ckpt).
+/// Load model weights from a safetensors file.
 ///
-/// This reads the pickle-format checkpoint and extracts the state_dict.
-/// Since we cannot easily read Python pickle in Rust, the expected workflow
-/// is to first convert the checkpoint to safetensors format using a helper
-/// script, then load with `WeightMap::from_safetensors`.
+/// Despite the name, this function only reads safetensors format — not raw
+/// PyTorch Lightning `.ckpt` files. Convert a `.ckpt` first:
 ///
-/// Alternatively, the download binary extracts safetensors directly.
+/// ```bash
+/// python3 scripts/convert_checkpoint.py best.ckpt model.safetensors
+/// ```
+///
+/// The conversion strips the `model.` prefix from all weight keys and saves
+/// a `model_build_args.json` sidecar with feature dims and output shape.
 pub fn load_checkpoint(path: &str) -> anyhow::Result<WeightMap> {
     WeightMap::from_safetensors(path)
 }
@@ -259,7 +266,10 @@ fn load_encoder_weights(wm: &mut WeightMap, encoder: &mut XTransformerEncoder) -
         encoder.final_norm.g = g.data[0];
     }
 
-    // Rotary embedding inv_freq is a buffer, not a parameter — recomputed from config
+    // Rotary embedding inv_freq is saved as a buffer in the checkpoint but we
+    // recompute it from the config (values match to < 1e-7). Consume the key
+    // so it doesn't show up in the "unused weights" warning.
+    wm.try_take("encoder.rotary_pos_emb.inv_freq");
 
     Ok(())
 }

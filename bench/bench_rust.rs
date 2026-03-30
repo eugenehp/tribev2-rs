@@ -4,9 +4,9 @@
 
 use std::collections::BTreeMap;
 use std::time::Instant;
-use tribev2_rs::config::*;
-use tribev2_rs::model::tribe::TribeV2;
-use tribev2_rs::tensor::Tensor;
+use tribev2::config::*;
+use tribev2::model::tribe::TribeV2;
+use tribev2::tensor::Tensor;
 
 fn pretrained_config() -> BrainModelConfig {
     BrainModelConfig {

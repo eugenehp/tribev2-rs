@@ -2,15 +2,15 @@
 //! at every stage of the forward pass.
 
 use std::collections::BTreeMap;
-use tribev2_rs::config::*;
-use tribev2_rs::model::feedforward::FeedForward;
-use tribev2_rs::model::projector::Projector;
-use tribev2_rs::model::residual::Residual;
-use tribev2_rs::model::rotary::RotaryEmbedding;
-use tribev2_rs::model::scalenorm::ScaleNorm;
-use tribev2_rs::model::subject_layers::SubjectLayers;
-use tribev2_rs::model::tribe::TribeV2;
-use tribev2_rs::tensor::Tensor;
+use tribev2::config::*;
+use tribev2::model::feedforward::FeedForward;
+use tribev2::model::projector::Projector;
+use tribev2::model::residual::Residual;
+use tribev2::model::rotary::RotaryEmbedding;
+use tribev2::model::scalenorm::ScaleNorm;
+use tribev2::model::subject_layers::SubjectLayers;
+use tribev2::model::tribe::TribeV2;
+use tribev2::tensor::Tensor;
 
 fn approx_eq(a: f32, b: f32, tol: f32) -> bool {
     (a - b).abs() < tol
@@ -389,7 +389,7 @@ fn test_aggregate_sum() {
 fn test_attention_numerical() {
     // Manually verify attention with known weights on a tiny example
     // dim=4, heads=2, dim_head=2
-    use tribev2_rs::model::attention::Attention;
+    use tribev2::model::attention::Attention;
 
     let mut attn = Attention::new(4, 2);
     // Set all projection weights to identity: [4, 4]
@@ -434,7 +434,7 @@ fn test_attention_numerical() {
 
 #[test]
 fn test_encoder_deterministic() {
-    use tribev2_rs::model::encoder::XTransformerEncoder;
+    use tribev2::model::encoder::XTransformerEncoder;
 
     let config = EncoderConfig {
         heads: 2,

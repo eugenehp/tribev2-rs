@@ -6,8 +6,8 @@
 
 use std::time::Instant;
 use burn::prelude::*;
-use tribev2_rs::config::*;
-use tribev2_rs::model_burn::*;
+use tribev2::config::*;
+use tribev2::model_burn::*;
 
 // ── Backend ───────────────────────────────────────────────────────────────
 #[cfg(all(feature = "wgpu", not(feature = "ndarray")))]
@@ -113,7 +113,7 @@ fn main() {
     let enc_cfg = EncoderConfig { depth: 8, heads: 8, ff_mult: 4,
         use_scalenorm: true, rotary_pos_emb: true, scale_residual: true,
         ..Default::default() };
-    let enc = encoder::XTransformerEncoder::<B>::new(dim, &enc_cfg, &dev);
+    let enc = encoder::XTransformerEncoder::<B>::new(dim, 1024, &enc_cfg, &dev);
     time_op("[1,100,1152] 8 layers", 3, || {
         let _ = sync(enc.forward(x.clone()));
     });

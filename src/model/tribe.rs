@@ -19,7 +19,7 @@
 //!   - time_pos_embed: [1, 1024, 1152]
 //!   - encoder: x_transformers Encoder(dim=1152, depth=8, heads=8, ...)
 //!   - low_rank_head: Linear(1152, 2048, bias=False)
-//!   - predictor: SubjectLayers(2048, 20484, n_subjects=26)
+//!   - predictor: SubjectLayers(2048, 20484, n_subjects=1)  (released weights; multi-subject checkpoints may differ)
 //!   - pooler: AdaptiveAvgPool1d(100)
 
 use std::collections::BTreeMap;

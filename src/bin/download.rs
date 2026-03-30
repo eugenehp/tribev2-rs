@@ -5,7 +5,7 @@
 //!
 //! Examples:
 //!   # Download public model weights
-//!   tribev2-download --repo facebook/tribev2 --output ./weights
+//!   tribev2-download --repo eugenehp/tribev2 --output ./weights
 //!
 //!   # Download from a private / gated repo
 //!   tribev2-download --repo my-org/tribev2-private --token hf_xxxx --output ./weights
@@ -32,8 +32,8 @@ If model.safetensors is not present in the repo the tool falls back to best.ckpt
 and prints the Python one-liner needed to convert it to safetensors format."
 )]
 struct Args {
-    /// HuggingFace repo ID (e.g. \"facebook/tribev2\")
-    #[arg(long, default_value = "facebook/tribev2")]
+    /// HuggingFace repo ID (e.g. \"eugenehp/tribev2\")
+    #[arg(long, default_value = "eugenehp/tribev2")]
     repo: String,
 
     /// Local directory to save files into
