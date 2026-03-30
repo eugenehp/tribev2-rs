@@ -173,23 +173,53 @@ std::fs::write("brain.svg", &svg).unwrap();
 
 | Flag | Description |
 |------|-------------|
-| `metal` | macOS Metal GPU for LLaMA (default) |
-| `cuda` | NVIDIA CUDA GPU for LLaMA |
-| `vulkan` | Vulkan GPU for LLaMA |
-| `accelerate` | Apple Accelerate BLAS for tensor ops |
-| `hf-download` | Enable HuggingFace Hub download binary |
+| **Burn CPU** | |
+| `ndarray` | Burn NdArray backend with Rayon (default) |
+| `blas-accelerate` | + Apple Accelerate BLAS (fast on Apple Silicon) |
+| **Burn GPU** | |
+| `wgpu` | Burn wgpu backend — auto-detects Metal/Vulkan/DX12 |
+| `wgpu-metal` | + native Metal shaders (MSL) — fastest on macOS |
+| `wgpu-vulkan` | + native Vulkan shaders (SPIR-V) — fastest on Linux |
+| **LLaMA GPU** | |
+| `llama-metal` | macOS Metal for LLaMA text extraction (default) |
+| `llama-cuda` | NVIDIA CUDA for LLaMA |
+| `llama-vulkan` | Vulkan for LLaMA |
+| **Utilities** | |
+| `hf-download` | HuggingFace Hub download binary |
+
+## Benchmarks
+
+Full forward pass: 1152-d, 8-layer transformer, 20,484 outputs, 100 timesteps, 3 modalities.
+
+| Backend | Latency | Speedup |
+|---------|---------|---------|
+| Rust CPU (naive loops) | 14,517 ms | 1× |
+| Burn NdArray (Rayon) | 316 ms | 46× |
+| Burn NdArray + Accelerate | 143 ms | 102× |
+| Rust CPU (Accelerate BLAS) | 73 ms | 199× |
+| **Burn wgpu (Metal GPU)** | **21.5 ms** | **675×** |
+
+```bash
+# CPU
+cargo run --release --example bench_burn
+cargo run --release --example bench_burn --features blas-accelerate
+cargo run --release --features accelerate --example bench_rust
+
+# GPU (macOS Metal)
+cargo run --release --example bench_burn --no-default-features --features wgpu-metal,llama-metal
+
+# GPU (Linux Vulkan)
+cargo run --release --example bench_burn --no-default-features --features wgpu-vulkan
+```
 
 ## Tests
 
 ```bash
-# All tests (unit + integration + parity)
+# All tests (96: unit + integration + parity + e2e)
 cargo test
 
 # End-to-end with real pretrained model (requires weights in data/)
 cargo test --release test_e2e_multimodal -- --nocapture
-
-# Benchmarks
-cargo run --release --example bench_rust
 ```
 
 ## Citation

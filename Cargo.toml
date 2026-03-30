@@ -41,21 +41,28 @@ name = "profile_burn"
 path = "bench/profile_burn.rs"
 
 [features]
-default = ["ndarray", "metal"]
-# ── CPU backends ─────────────────────────────────────────────
+default = ["ndarray", "llama-metal"]
+
+# ── Burn CPU backends ─────────────────────────────────────────
 ndarray         = ["dep:burn-ndarray", "burn/ndarray"]
 blas-accelerate = ["burn-ndarray?/blas-accelerate"]
-# ── GPU backend ──────────────────────────────────────────────
+
+# ── Burn GPU backend (wgpu) ───────────────────────────────────
+# Base: WGSL shaders, auto-detects Metal/Vulkan/DX12 at runtime
 wgpu            = ["burn/wgpu"]
+# macOS: native Metal shader compilation (MSL)
 wgpu-metal      = ["wgpu", "burn-wgpu/metal"]
+# Linux/Windows: native Vulkan shader compilation (SPIR-V)
 wgpu-vulkan     = ["wgpu", "burn-wgpu/vulkan"]
-# ── llama-cpp GPU ────────────────────────────────────────────
-cuda   = ["llama-cpp-4/cuda"]
-metal  = ["llama-cpp-4/metal"]
-vulkan = ["llama-cpp-4/vulkan"]
-# ── Utilities ────────────────────────────────────────────────
+
+# ── llama-cpp GPU acceleration ────────────────────────────────
+llama-cuda   = ["llama-cpp-4/cuda"]
+llama-metal  = ["llama-cpp-4/metal"]
+llama-vulkan = ["llama-cpp-4/vulkan"]
+
+# ── Utilities ─────────────────────────────────────────────────
 hf-download = ["dep:hf-hub"]
-accelerate = []  # legacy: direct cblas calls (deprecated, use blas-accelerate)
+accelerate  = []  # legacy: direct cblas calls in tensor.rs
 
 [dependencies]
 burn         = { version = "0.20.1", default-features = false, features = ["std", "simd"] }

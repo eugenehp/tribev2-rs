@@ -102,9 +102,9 @@ pub fn extract_llama_features(
     let backend = LlamaBackend::init()?;
 
     let model_params = {
-        #[cfg(any(feature = "cuda", feature = "vulkan", feature = "metal"))]
+        #[cfg(any(feature = "llama-cuda", feature = "llama-vulkan", feature = "llama-metal"))]
         { LlamaModelParams::default().with_n_gpu_layers(1000) }
-        #[cfg(not(any(feature = "cuda", feature = "vulkan", feature = "metal")))]
+        #[cfg(not(any(feature = "llama-cuda", feature = "llama-vulkan", feature = "llama-metal")))]
         { LlamaModelParams::default() }
     };
 
@@ -235,9 +235,9 @@ pub fn extract_llama_features_timed(
     let backend = LlamaBackend::init()?;
 
     let model_params = {
-        #[cfg(any(feature = "cuda", feature = "vulkan", feature = "metal"))]
+        #[cfg(any(feature = "llama-cuda", feature = "llama-vulkan", feature = "llama-metal"))]
         { LlamaModelParams::default().with_n_gpu_layers(1000) }
-        #[cfg(not(any(feature = "cuda", feature = "vulkan", feature = "metal")))]
+        #[cfg(not(any(feature = "llama-cuda", feature = "llama-vulkan", feature = "llama-metal")))]
         { LlamaModelParams::default() }
     };
 

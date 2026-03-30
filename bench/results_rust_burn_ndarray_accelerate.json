@@ -1,1 +1,1 @@
-{"rust_burn_ndarray_accelerate":{"mean_ms":946.3,"min_ms":929.6,"max_ms":958.4,"std_ms":9.3,"n_runs":5,"output_shape":[1,20484,100]}}
+{"rust_burn_ndarray_accelerate":{"mean_ms":142.7,"min_ms":134.5,"max_ms":157.7,"std_ms":8.6,"n_runs":5,"output_shape":[1,20484,100],"backend":"NdArray + Apple Accelerate"}}
