@@ -9,16 +9,16 @@ use super::subject_layers::SubjectLayers;
 /// Full TRIBE v2 FmriEncoderModel in burn.
 #[derive(Module, Debug)]
 pub struct TribeV2Burn<B: Backend> {
-    pub projectors: Vec<Projector<B>>,
-    pub projector_names: Vec<String>,
-    pub time_pos_embed: Option<Param<Tensor<B, 3>>>,
-    pub encoder: Option<XTransformerEncoder<B>>,
-    pub low_rank_head: Option<Linear<B>>,
-    pub predictor: SubjectLayers<B>,
-    pub n_outputs: usize,
+    pub projectors:       Vec<Projector<B>>,
+    pub projector_names:  Vec<String>,
+    pub time_pos_embed:   Option<Param<Tensor<B, 3>>>,
+    pub encoder:          Option<XTransformerEncoder<B>>,
+    pub low_rank_head:    Option<Linear<B>>,
+    pub predictor:        SubjectLayers<B>,
+    pub n_outputs:          usize,
     pub n_output_timesteps: usize,
-    pub hidden: usize,
-    pub n_modalities: usize,
+    pub hidden:             usize,
+    pub n_modalities:       usize,
     pub use_average_subjects: bool,
 }
 
@@ -30,10 +30,10 @@ impl<B: Backend> TribeV2Burn<B> {
         config: &BrainModelConfig,
         device: &B::Device,
     ) -> Self {
-        let hidden = config.hidden;
+        let hidden      = config.hidden;
         let n_modalities = feature_dims.len();
 
-        let mut projectors = Vec::new();
+        let mut projectors      = Vec::new();
         let mut projector_names = Vec::new();
         for md in feature_dims {
             if let Some((num_layers, feature_dim)) = md.dims {
@@ -62,7 +62,9 @@ impl<B: Backend> TribeV2Burn<B> {
         };
 
         let encoder = if !config.linear_baseline {
-            config.encoder.as_ref().map(|ec| XTransformerEncoder::new(hidden, ec, device))
+            config.encoder.as_ref().map(|ec| {
+                XTransformerEncoder::new(hidden, config.max_seq_len, ec, device)
+            })
         } else {
             None
         };
@@ -72,8 +74,8 @@ impl<B: Backend> TribeV2Burn<B> {
         });
 
         let bottleneck = config.low_rank_head.unwrap_or(hidden);
-        let sl = config.subject_layers.clone().unwrap_or_default();
-        let predictor = SubjectLayers::new(bottleneck, n_outputs, &sl, device);
+        let sl         = config.subject_layers.clone().unwrap_or_default();
+        let predictor  = SubjectLayers::new(bottleneck, n_outputs, &sl, device);
         let use_average_subjects = sl.average_subjects;
 
         Self {
@@ -82,87 +84,111 @@ impl<B: Backend> TribeV2Burn<B> {
             use_average_subjects,
         }
     }
+}
 
+// ── forward — standard burn-ops path ──────────────────────────────────────
+#[cfg(not(feature = "wgpu-kernels-metal"))]
+impl<B: Backend> TribeV2Burn<B> {
     /// Forward pass.
-    /// features: Vec of (name, tensor [B, L*D, T]) in feature_dims order.
-    /// Returns: [B, n_outputs, n_output_timesteps]
+    /// `features`: Vec of `(name, tensor [B, L*D, T])` in feature_dims order.
+    /// Returns `[B, n_outputs, n_output_timesteps]`.
     pub fn forward(&self, features: Vec<(&str, Tensor<B, 3>)>) -> Tensor<B, 3> {
-        let device = features[0].1.device();
-        let b = features[0].1.dims()[0];
-        let t = features[0].1.dims()[2];
-
-        // Aggregate: project each modality and cat on last dim
-        let mut tensors: Vec<Tensor<B, 3>> = Vec::with_capacity(self.n_modalities);
-
-        // Process provided features
-        for (name, data) in &features {
-            if let Some(idx) = self.projector_names.iter().position(|n| n == name) {
-                // [B, L*D, T] → swap to [B, T, L*D] → project → [B, T, out_dim]
-                let x = data.clone().swap_dims(1, 2);
-                tensors.push(self.projectors[idx].forward(x));
-            }
-        }
-        // Zero-fill for modalities not in features
-        for name in &self.projector_names {
-            if !features.iter().any(|(n, _)| n == name) {
-                let out_dim = self.hidden / self.n_modalities;
-                tensors.push(Tensor::zeros([b, t, out_dim], &device));
-            }
-        }
-
-        // Cat on last dim → [B, T, H]
-        let mut x = Tensor::cat(tensors, 2);
-
-        // Time pos embed
-        if let Some(ref tpe) = self.time_pos_embed {
-            let tpe_slice = tpe.val().slice([0..1, 0..t, 0..self.hidden]);
-            x = x + tpe_slice;
-        }
-
-        // Encoder
-        if let Some(ref enc) = self.encoder {
-            x = enc.forward(x);
-        }
-
-        // [B, T, H] → [B, H, T]
-        x = x.swap_dims(1, 2);
-
-        // Low-rank head: [B, H, T] → [B, T, H] → Linear → [B, T, LR] → [B, LR, T]
-        if let Some(ref lr) = self.low_rank_head {
-            x = lr.forward(x.swap_dims(1, 2)).swap_dims(1, 2);
-        }
-
-        // Predictor: [B, C, T] → [B, D, T]
-        x = if self.use_average_subjects {
-            self.predictor.forward_average(x)
-        } else {
-            self.predictor.forward_subjects(x, &[0])
-        };
-
-        // Adaptive avg pool over T: [B, D, T] → [B, D, T']
-        adaptive_avg_pool1d(x, self.n_output_timesteps)
+        forward_body(self, features)
     }
 }
 
-/// AdaptiveAvgPool1d: [B, D, T_in] → [B, D, T_out]
-/// When T_in == T_out (common case for pretrained model), returns identity.
+// ── forward — fused-kernel path ────────────────────────────────────────────
+#[cfg(feature = "wgpu-kernels-metal")]
+impl<B: Backend + crate::model_burn::FusedOps> TribeV2Burn<B> {
+    pub fn forward(&self, features: Vec<(&str, Tensor<B, 3>)>) -> Tensor<B, 3> {
+        forward_body(self, features)
+    }
+}
+
+// ── Shared body (macro-duplicated to carry the right where-bound) ──────────
+
+/// Macro to define `forward_body` for a given trait bound.
+/// The macro emits two identical definitions — the only difference is
+/// whether the `FusedOps` bound is present on `B`.
+macro_rules! define_forward_body {
+    ($($bound:tt)*) => {
+        fn forward_body<B: Backend $($bound)*>(
+            m:        &TribeV2Burn<B>,
+            features: Vec<(&str, Tensor<B, 3>)>,
+        ) -> Tensor<B, 3> {
+            let device = features[0].1.device();
+            let b = features[0].1.dims()[0];
+            let t = features[0].1.dims()[2];
+
+            // ── 1. Project each modality and concatenate ──────────────────
+            let mut tensors: Vec<Tensor<B, 3>> = Vec::with_capacity(m.n_modalities);
+            for (name, data) in &features {
+                if let Some(idx) = m.projector_names.iter().position(|n| n == name) {
+                    let x = data.clone().swap_dims(1, 2); // [B, L*D, T] → [B, T, L*D]
+                    tensors.push(m.projectors[idx].forward(x));
+                }
+            }
+            for name in &m.projector_names {
+                if !features.iter().any(|(n, _)| n == name) {
+                    let out_dim = m.hidden / m.n_modalities;
+                    tensors.push(Tensor::zeros([b, t, out_dim], &device));
+                }
+            }
+            let mut x = Tensor::cat(tensors, 2); // [B, T, H]
+
+            // ── 2. Time positional embedding ──────────────────────────────
+            if let Some(ref tpe) = m.time_pos_embed {
+                x = x + tpe.val().slice([0..1, 0..t, 0..m.hidden]);
+            }
+
+            // ── 3. Transformer encoder ────────────────────────────────────
+            if let Some(ref enc) = m.encoder {
+                x = enc.forward(x);
+            }
+
+            // ── 4. [B, T, H] → [B, H, T] ─────────────────────────────────
+            x = x.swap_dims(1, 2);
+
+            // ── 5. Low-rank head ──────────────────────────────────────────
+            if let Some(ref lr) = m.low_rank_head {
+                x = lr.forward(x.swap_dims(1, 2)).swap_dims(1, 2);
+            }
+
+            // ── 6. Subject predictor ──────────────────────────────────────
+            x = if m.use_average_subjects {
+                m.predictor.forward_average(x)
+            } else {
+                m.predictor.forward_subjects(x, &[0])
+            };
+
+            // ── 7. Adaptive avg-pool over T ───────────────────────────────
+            adaptive_avg_pool1d(x, m.n_output_timesteps)
+        }
+    };
+}
+
+#[cfg(not(feature = "wgpu-kernels-metal"))]
+define_forward_body!();
+
+#[cfg(feature = "wgpu-kernels-metal")]
+define_forward_body!(+ crate::model_burn::FusedOps);
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/// AdaptiveAvgPool1d: [B, D, T_in] → [B, D, T_out].
+/// Identity when T_in == T_out (the common inference case).
 pub fn adaptive_avg_pool1d_pub<B: Backend>(x: Tensor<B, 3>, t_out: usize) -> Tensor<B, 3> {
     adaptive_avg_pool1d(x, t_out)
 }
 
 fn adaptive_avg_pool1d<B: Backend>(x: Tensor<B, 3>, t_out: usize) -> Tensor<B, 3> {
     let [b, d, t_in] = x.dims();
-    if t_in == t_out {
-        return x;
-    }
-    // General case: compute bin boundaries and use slice + mean
-    // For the pretrained model this branch is never taken (T=100, T'=100).
+    if t_in == t_out { return x; }
     let mut slices = Vec::with_capacity(t_out);
     for i in 0..t_out {
         let start = (i * t_in) / t_out;
-        let end = ((i + 1) * t_in) / t_out;
-        let chunk = x.clone().slice([0..b, 0..d, start..end]);
-        slices.push(chunk.mean_dim(2));
+        let end   = ((i + 1) * t_in) / t_out;
+        slices.push(x.clone().slice([0..b, 0..d, start..end]).mean_dim(2));
     }
     Tensor::cat(slices, 2)
 }

@@ -1,0 +1,1 @@
+{"rust_burn_wgpu_metal_kernels":{"mean_ms":16.8,"min_ms":15.8,"max_ms":19.2,"std_ms":1.1,"n_runs":10,"output_shape":[1,20484,100],"backend":"wgpu (Metal / MSL, f32, fused CubeCL kernels)"}}

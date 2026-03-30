@@ -52,6 +52,15 @@ blas-accelerate = ["burn-ndarray?/blas-accelerate"]
 wgpu            = ["burn/wgpu"]
 # macOS: native Metal shader compilation (MSL)
 wgpu-metal      = ["wgpu", "burn-wgpu/metal"]
+# macOS Metal with f16 dtype — uses Metal WMMA (SIMD-group matmul),
+# 2× arithmetic throughput + 2× memory bandwidth vs f32.
+# Run: cargo run --release --example bench_burn \
+#        --no-default-features --features wgpu-metal-f16,llama-metal
+wgpu-metal-f16  = ["wgpu-metal"]
+# Custom fused CubeCL kernels on Metal (no fusion wrapper, direct CubeBackend).
+# Fused RoPE: 1 kernel vs ~10 dispatches × 16 applies per forward → ~2 ms gain.
+# Fused ScaleNorm: 1 kernel (plane_sum) vs 3 dispatches × 17 calls → ~1 ms gain.
+wgpu-kernels-metal = ["wgpu-metal", "dep:cubecl", "dep:burn-cubecl", "dep:burn-backend"]
 # Linux/Windows: native Vulkan shader compilation (SPIR-V)
 wgpu-vulkan     = ["wgpu", "burn-wgpu/vulkan"]
 
@@ -68,6 +77,9 @@ accelerate  = []  # legacy: direct cblas calls in tensor.rs
 burn         = { version = "0.20.1", default-features = false, features = ["std", "simd"] }
 burn-ndarray = { version = "0.20.1", default-features = false, features = ["std", "simd", "multi-threads"], optional = true }
 burn-wgpu    = { version = "0.20.1", default-features = true, optional = true }
+cubecl        = { version = "0.9", features = ["wgpu"], optional = true }
+burn-cubecl   = { version = "0.20.1", optional = true }
+burn-backend  = { version = "0.20.1", optional = true }
 llama-cpp-4  = { version = "0.2.15", default-features = false }
 safetensors  = "0.7"
 half         = { version = "2", features = ["bytemuck"] }

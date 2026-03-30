@@ -4,8 +4,14 @@
 //!   cargo run --release --example bench_burn
 //!   cargo run --release --example bench_burn --features blas-accelerate
 //!
-//! GPU (macOS Metal):
+//! GPU (macOS Metal, f32):
 //!   cargo run --release --example bench_burn --no-default-features --features wgpu-metal,llama-metal
+//!
+//! GPU (macOS Metal, f16 — recommended, uses Metal WMMA for ~2x faster matmuls):
+//!   cargo run --release --example bench_burn --no-default-features --features wgpu-metal-f16,llama-metal
+//!
+//! GPU (macOS Metal, fused CubeCL kernels — fused RoPE + ScaleNorm, no fusion wrapper):
+//!   cargo run --release --example bench_burn --no-default-features --features wgpu-kernels-metal,llama-metal
 //!
 //! GPU (Linux/Windows Vulkan):
 //!   cargo run --release --example bench_burn --no-default-features --features wgpu-vulkan
@@ -14,26 +20,49 @@
 //!   cargo run --release --example bench_burn --no-default-features --features wgpu
 
 use std::time::Instant;
-use tribev2_rs::config::*;
-use tribev2_rs::model_burn::tribe::TribeV2Burn;
+use tribev2::config::*;
+use tribev2::model_burn::tribe::TribeV2Burn;
 
 // ── Backend dispatch (compile-time) ───────────────────────────────────────
 
-#[cfg(all(feature = "wgpu", not(feature = "ndarray")))]
+#[cfg(all(feature = "wgpu", not(feature = "ndarray")))]  
 mod backend {
+    // wgpu-kernels-metal: no-fusion CubeBackend + fused RoPE/ScaleNorm kernels.
+    // Uses CubeBackend<WgpuRuntime, f32> directly (no Fusion wrapper),
+    // so custom #[cube] kernels can access the underlying CubeTensor.
+    #[cfg(feature = "wgpu-kernels-metal")]
+    pub type B = burn::backend::wgpu::CubeBackend<
+        cubecl::wgpu::WgpuRuntime, f32, i32, u32
+    >;
+
+    // f16 path: Metal WMMA gives 2x matmul throughput over f32.
+    #[cfg(all(feature = "wgpu-metal-f16", not(feature = "wgpu-kernels-metal")))]
+    pub type B = burn::backend::Wgpu<half::f16, i32>;
+
+    // Default f32 fusion path.
+    #[cfg(not(any(feature = "wgpu-metal-f16", feature = "wgpu-kernels-metal")))]
     pub use burn::backend::Wgpu as B;
+
     pub fn device() -> burn::backend::wgpu::WgpuDevice {
         burn::backend::wgpu::WgpuDevice::DefaultDevice
     }
-    #[cfg(feature = "wgpu-metal")]
-    pub const NAME: &str = "wgpu (Metal / MSL)";
-    #[cfg(feature = "wgpu-vulkan")]
+
+    #[cfg(feature = "wgpu-kernels-metal")]
+    pub const NAME: &str = "wgpu (Metal / MSL, f32, fused CubeCL kernels)";
+    #[cfg(all(feature = "wgpu-metal", feature = "wgpu-metal-f16", not(feature = "wgpu-kernels-metal")))]
+    pub const NAME: &str = "wgpu (Metal / MSL, f16)";
+    #[cfg(all(feature = "wgpu-metal", not(feature = "wgpu-metal-f16"), not(feature = "wgpu-kernels-metal")))]
+    pub const NAME: &str = "wgpu (Metal / MSL, f32)";
+    #[cfg(all(feature = "wgpu-vulkan", not(feature = "wgpu-kernels-metal")))]
     pub const NAME: &str = "wgpu (Vulkan / SPIR-V)";
-    #[cfg(not(any(feature = "wgpu-metal", feature = "wgpu-vulkan")))]
+    #[cfg(not(any(feature = "wgpu-metal", feature = "wgpu-vulkan", feature = "wgpu-kernels-metal")))]
     pub const NAME: &str = "wgpu (WGSL — auto backend)";
-    pub const KEY: &str = if cfg!(feature = "wgpu-metal") { "rust_burn_wgpu_metal" }
-        else if cfg!(feature = "wgpu-vulkan") { "rust_burn_wgpu_vulkan" }
-        else { "rust_burn_wgpu" };
+
+    pub const KEY: &str = if cfg!(feature = "wgpu-kernels-metal") { "rust_burn_wgpu_metal_kernels" }
+        else if cfg!(feature = "wgpu-metal-f16") { "rust_burn_wgpu_metal_f16" }
+        else if cfg!(feature = "wgpu-metal")     { "rust_burn_wgpu_metal" }
+        else if cfg!(feature = "wgpu-vulkan")    { "rust_burn_wgpu_vulkan" }
+        else                                     { "rust_burn_wgpu" };
 }
 
 #[cfg(feature = "ndarray")]
@@ -105,8 +134,8 @@ fn main() {
     let audio = Tensor::<B, 3>::ones([1, 2048, t], &dev).mul_scalar(0.01);
     let video = Tensor::<B, 3>::ones([1, 2816, t], &dev).mul_scalar(0.01);
 
-    let n_warmup = 3;
-    let n_runs = 5;
+    let n_warmup = 5;
+    let n_runs = 10;
 
     // Warmup
     eprintln!("Warmup ({n_warmup} runs)...");
