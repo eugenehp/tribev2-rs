@@ -1,0 +1,29 @@
+[package]
+name = "tribev2-video"
+version = "0.0.2"
+edition = "2021"
+description = "V-JEPA2 ViT-G video feature extraction for TRIBE v2 (burn backend)"
+keywords = ["fmri", "video", "vjepa", "feature-extraction"]
+categories = ["science", "mathematics"]
+authors = ["Eugene Hauptmann"]
+license = "Apache-2.0"
+
+[features]
+default = ["ndarray"]
+
+ndarray         = ["dep:burn-ndarray", "burn/ndarray"]
+blas-accelerate = ["burn-ndarray?/blas-accelerate"]
+wgpu            = ["burn/wgpu"]
+wgpu-metal      = ["wgpu", "burn-wgpu/metal"]
+wgpu-vulkan     = ["wgpu", "burn-wgpu/vulkan"]
+
+[dependencies]
+burn         = { version = "0.20.1", default-features = false, features = ["std", "simd"] }
+burn-ndarray = { version = "0.20.1", default-features = false, features = ["std", "simd", "multi-threads"], optional = true }
+burn-wgpu    = { version = "0.20.1", default-features = true, optional = true }
+safetensors  = "0.7"
+half         = { version = "2", features = ["bytemuck"] }
+serde        = { version = "1", features = ["derive"] }
+serde_json   = "1"
+anyhow       = "1.0"
+image        = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

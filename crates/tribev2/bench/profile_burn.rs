@@ -60,9 +60,9 @@ fn main() {
 
     // ── Projectors ────────────────────────────────────────────────────
     println!("Projectors:");
-    let proj_text = projector::Projector::<B>::new(6144, 384, &dev);
-    let proj_audio = projector::Projector::<B>::new(2048, 384, &dev);
-    let proj_video = projector::Projector::<B>::new(2816, 384, &dev);
+    let proj_text = projector::Projector::<B>::new_linear(6144, 384, &dev);
+    let proj_audio = projector::Projector::<B>::new_linear(2048, 384, &dev);
+    let proj_video = projector::Projector::<B>::new_linear(2816, 384, &dev);
     let txt_in = Tensor::<B,3>::ones([1, t_len, 6144], &dev).mul_scalar(0.01);
     let aud_in = Tensor::<B,3>::ones([1, t_len, 2048], &dev).mul_scalar(0.01);
     let vid_in = Tensor::<B,3>::ones([1, t_len, 2816], &dev).mul_scalar(0.01);

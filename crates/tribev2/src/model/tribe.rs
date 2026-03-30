@@ -107,9 +107,25 @@ impl TribeV2 {
                 } else {
                     hidden
                 };
+
+                // Check if projector config specifies SubjectLayers
+                let proj = if config.projector.name.as_deref() == Some("SubjectLayers") {
+                    let sl_cfg = config.subject_layers.clone().unwrap_or_default();
+                    Projector::new_subject_layers(input_dim, output_dim, &sl_cfg)
+                } else if let Some(ref hs) = config.projector.hidden_sizes {
+                    if !hs.is_empty() {
+                        let has_norm = config.projector.norm_layer.as_deref() == Some("layer");
+                        Projector::new_mlp(input_dim, output_dim, hs, has_norm)
+                    } else {
+                        Projector::new_linear(input_dim, output_dim)
+                    }
+                } else {
+                    Projector::new_linear(input_dim, output_dim)
+                };
+
                 projectors.push(NamedProjector {
                     name: md.name.clone(),
-                    projector: Projector::new_linear(input_dim, output_dim),
+                    projector: proj,
                 });
             }
             // None dims → no projector, will get zero-padded in aggregate_features
@@ -242,10 +258,20 @@ impl TribeV2 {
     /// Aggregate features from multiple modalities.
     ///
     /// `features`: map from modality name → tensor [B, L, D, T] or [B, D, T].
+    /// `subject_ids`: per-batch subject indices (needed if projector is SubjectLayers).
     /// Returns: [B, T, H]
     pub fn aggregate_features(
         &self,
         features: &BTreeMap<String, Tensor>,
+    ) -> Tensor {
+        self.aggregate_features_with_subjects(features, None)
+    }
+
+    /// Aggregate features with explicit subject IDs.
+    pub fn aggregate_features_with_subjects(
+        &self,
+        features: &BTreeMap<String, Tensor>,
+        subject_ids: Option<&[usize]>,
     ) -> Tensor {
         let n_modalities = self.feature_dims.len();
         let hidden = self.config.hidden;
@@ -300,7 +326,7 @@ impl TribeV2 {
                 let data = data.permute(&[0, 2, 1]); // [B, T, D]
 
                 // Apply projector: [B, T, D] → [B, T, H/n_modalities]
-                let data = projector.forward(&data);
+                let data = projector.forward_with_subjects(&data, subject_ids);
 
                 tensors.push(data);
             } else {
@@ -396,7 +422,7 @@ impl TribeV2 {
         pool_outputs: bool,
     ) -> Tensor {
         // 1. Aggregate features → [B, T, H]
-        let mut x = self.aggregate_features(features);
+        let mut x = self.aggregate_features_with_subjects(features, subject_ids);
 
         // 2. Temporal smoothing (if present): transpose to [B, H, T], convolve, transpose back
         if let Some(ref ts) = self.temporal_smoothing {
@@ -435,8 +461,9 @@ impl TribeV2 {
                 for di in 0..d {
                     let base = bi * d * t_in + di * t_in;
                     for i in 0..self.n_output_timesteps {
+                        // Match PyTorch AdaptiveAvgPool1d: floor(start), ceil(end)
                         let start = (i * t_in) / self.n_output_timesteps;
-                        let end = ((i + 1) * t_in) / self.n_output_timesteps;
+                        let end = ((i + 1) * t_in + self.n_output_timesteps - 1) / self.n_output_timesteps;
                         let len = (end - start) as f32;
                         let sum: f32 = x.data[base + start..base + end].iter().sum();
                         pooled_data.push(sum / len);

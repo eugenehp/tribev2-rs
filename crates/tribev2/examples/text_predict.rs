@@ -1,7 +1,11 @@
 //! Example: Text-based brain activity prediction using TRIBE v2.
 //!
-//! This example demonstrates loading a pretrained model and running
-//! inference with synthetic text features.
+//! Demonstrates building a model from config and running a forward pass
+//! with synthetic text features. No pretrained weights needed.
+//!
+//! ```bash
+//! cargo run --example text_predict
+//! ```
 
 use std::collections::BTreeMap;
 use tribev2::config::{BrainModelConfig, EncoderConfig, ModalityDims, SubjectLayersConfig};
@@ -12,9 +16,9 @@ fn main() -> anyhow::Result<()> {
     println!("TRIBE v2 — Text Prediction Example");
     println!("===================================\n");
 
-    // Build a small model for demonstration (not pretrained weights)
+    // Build a small model (random weights, for demonstration)
     let hidden = 128;
-    let n_outputs = 100; // small for demo
+    let n_outputs = 100;
     let n_output_timesteps = 10;
 
     let feature_dims = vec![
@@ -54,28 +58,21 @@ fn main() -> anyhow::Result<()> {
         }),
     };
 
-    let model = TribeV2::new(
-        feature_dims,
-        n_outputs,
-        n_output_timesteps,
-        &config,
-    );
+    let model = TribeV2::new(feature_dims, n_outputs, n_output_timesteps, &config);
 
     println!("Model built:");
     println!("  Hidden dim: {}", hidden);
     println!("  Output vertices: {}", n_outputs);
     println!("  Output timesteps: {}", n_output_timesteps);
 
-    // Create synthetic text features: [1, 128, 20] (B=1, D=128, T=20)
+    // Create synthetic features: [1, 128, 20] (B=1, D=128, T=20)
     let t = 20;
     let d = 128;
     let data: Vec<f32> = (0..d * t).map(|i| (i as f32 * 0.01).sin()).collect();
-    let text_tensor = Tensor::from_vec(data, vec![1, d, t]);
 
     let mut features = BTreeMap::new();
-    features.insert("text".to_string(), text_tensor);
+    features.insert("text".to_string(), Tensor::from_vec(data, vec![1, d, t]));
 
-    // Run forward pass
     let t0 = std::time::Instant::now();
     let output = model.forward(&features, Some(&[0]), true);
     let elapsed = t0.elapsed();
@@ -85,11 +82,10 @@ fn main() -> anyhow::Result<()> {
     println!("  Output shape: {:?}", output.shape);
     println!("  Time: {:.1} ms", elapsed.as_secs_f64() * 1000.0);
 
-    // Print some output statistics
     let mean: f32 = output.data.iter().sum::<f32>() / output.data.len() as f32;
     let max: f32 = output.data.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let min: f32 = output.data.iter().cloned().fold(f32::INFINITY, f32::min);
-    println!("  Output stats: mean={:.6}, min={:.6}, max={:.6}", mean, min, max);
+    println!("  Stats: mean={:.6}, min={:.6}, max={:.6}", mean, min, max);
 
     println!("\nDone!");
     Ok(())

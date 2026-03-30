@@ -172,6 +172,29 @@ fn default_hidden() -> usize { 1152 }
 fn default_max_seq_len() -> usize { 1024 }
 fn default_cat() -> String { "cat".into() }
 
+impl Default for BrainModelConfig {
+    fn default() -> Self {
+        Self {
+            projector: Default::default(),
+            combiner: None,
+            encoder: Some(EncoderConfig::default()),
+            time_pos_embedding: true,
+            subject_embedding: false,
+            subject_layers: Some(SubjectLayersConfig::default()),
+            hidden: 1152,
+            max_seq_len: 1024,
+            dropout: 0.0,
+            extractor_aggregation: "cat".into(),
+            layer_aggregation: "cat".into(),
+            linear_baseline: false,
+            modality_dropout: 0.0,
+            temporal_dropout: 0.0,
+            low_rank_head: None,
+            temporal_smoothing: None,
+        }
+    }
+}
+
 // ── MLP config ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize, Default)]

@@ -39,6 +39,7 @@ use std::collections::HashMap;
 use crate::tensor::Tensor;
 use crate::model::tribe::TribeV2;
 use crate::model::encoder::{LayerBlock, XTransformerEncoder};
+use crate::model::projector::Projector;
 
 /// A map of weight name → (f32 data, shape).
 pub struct WeightMap {
@@ -121,38 +122,108 @@ pub fn load_weights(wm: &mut WeightMap, model: &mut TribeV2) -> anyhow::Result<(
     for np in &mut model.projectors {
         let name = &np.name;
         let projector = &mut np.projector;
-        // MLP/Linear projector: projectors.<name>.0.weight, projectors.<name>.0.bias
-        // PyTorch Linear weight is [out, in]; we need [in, out] for our matmul
-        if let Ok(w) = wm.take(&format!("projectors.{name}.0.weight")) {
-            projector.layers[0].weight = w.transpose_last2(); // [out, in] → [in, out]
-        } else if let Ok(w) = wm.take(&format!("projectors.{name}.weight")) {
-            projector.layers[0].weight = w.transpose_last2();
-        }
-        if let Ok(b) = wm.take(&format!("projectors.{name}.0.bias")) {
-            projector.layers[0].bias = b;
-        } else if let Ok(b) = wm.take(&format!("projectors.{name}.bias")) {
-            projector.layers[0].bias = b;
-        }
 
-        // LayerNorm (if MLP with hidden layers; for the pretrained model this is absent)
-        if let Some(ref mut ln_w) = projector.layers[0].ln_weight {
-            if let Ok(w) = wm.take(&format!("projectors.{name}.0.1.weight")) {
-                *ln_w = w;
+        match projector {
+            Projector::SubjectLayers(ref mut sl) => {
+                // SubjectLayers projector: projectors.<name>.weights, projectors.<name>.bias
+                if let Ok(w) = wm.take(&format!("projectors.{name}.weights")) {
+                    sl.weights = w;
+                }
+                if let Ok(b) = wm.take(&format!("projectors.{name}.bias")) {
+                    sl.bias = Some(b);
+                }
+            }
+            Projector::Mlp(ref mut mlp) => {
+                // MLP projector weight loading.
+                //
+                // torchvision MLP layout:
+                //   layers.0 = Linear(in, hidden[0])       → key: projectors.<name>.0.0.weight
+                //   layers.1 = LayerNorm(hidden[0])        → key: projectors.<name>.0.1.weight
+                //   layers.2 = GELU                        (no weights)
+                //   layers.3 = Dropout                     (no weights)
+                //   layers.4 = Linear(hidden[0], hidden[1]) → key: projectors.<name>.4.0.weight
+                //   ...
+                //   final layer: Linear(last, out)         → key: projectors.<name>.{2*n}.0.weight
+                //
+                // For a single-layer projector (no hidden_sizes):
+                //   key: projectors.<name>.0.weight  or  projectors.<name>.weight
+                //
+                // We try both naming patterns.
+
+                if mlp.layers.len() == 1 {
+                    // Single linear: try projectors.<name>.0.weight then projectors.<name>.weight
+                    if let Ok(w) = wm.take(&format!("projectors.{name}.0.weight")) {
+                        mlp.layers[0].weight = w.transpose_last2();
+                    } else if let Ok(w) = wm.take(&format!("projectors.{name}.weight")) {
+                        mlp.layers[0].weight = w.transpose_last2();
+                    }
+                    if let Ok(b) = wm.take(&format!("projectors.{name}.0.bias")) {
+                        mlp.layers[0].bias = b;
+                    } else if let Ok(b) = wm.take(&format!("projectors.{name}.bias")) {
+                        mlp.layers[0].bias = b;
+                    }
+                } else {
+                    // Multi-layer MLP: torchvision layout
+                    // Each Rust layer i maps to PyTorch sequential index:
+                    //   layer 0 → pytorch idx 0 (Linear at .0.0, LayerNorm at .0.1)
+                    //   layer 1 → pytorch idx 4 (Linear at .4.0, LayerNorm at .4.1)
+                    //   ...
+                    //   layer N (final, no norm) → pytorch idx 4*N (or 4*(N-1)+4 for intermediates)
+                    //
+                    // Stride is 4 for intermediate layers (Linear+LN+GELU+Dropout)
+                    // Final layer stride is 1 (just Linear).
+                    let n_layers = mlp.layers.len();
+                    for (li, layer) in mlp.layers.iter_mut().enumerate() {
+                        // Compute the pytorch sequential index for this layer's Linear
+                        let pytorch_idx = if li < n_layers - 1 {
+                            li * 4  // intermediate: stride 4
+                        } else {
+                            (n_layers - 1) * 4 // final layer
+                        };
+
+                        // Linear weight: projectors.<name>.<idx>.0.weight
+                        // or projectors.<name>.<idx>.weight
+                        if let Ok(w) = wm.take(&format!("projectors.{name}.{pytorch_idx}.0.weight")) {
+                            layer.weight = w.transpose_last2();
+                        } else if let Ok(w) = wm.take(&format!("projectors.{name}.{pytorch_idx}.weight")) {
+                            layer.weight = w.transpose_last2();
+                        }
+                        if let Ok(b) = wm.take(&format!("projectors.{name}.{pytorch_idx}.0.bias")) {
+                            layer.bias = b;
+                        } else if let Ok(b) = wm.take(&format!("projectors.{name}.{pytorch_idx}.bias")) {
+                            layer.bias = b;
+                        }
+
+                        // LayerNorm: projectors.<name>.<idx>.1.weight/bias
+                        if let Some(ref mut ln_w) = layer.ln_weight {
+                            if let Ok(w) = wm.take(&format!("projectors.{name}.{pytorch_idx}.1.weight")) {
+                                *ln_w = w;
+                            }
+                        }
+                        if let Some(ref mut ln_b) = layer.ln_bias {
+                            if let Ok(b) = wm.take(&format!("projectors.{name}.{pytorch_idx}.1.bias")) {
+                                *ln_b = b;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
     // ── Combiner ──────────────────────────────────────────────────────
     if let Some(ref mut combiner) = model.combiner {
-        if let Ok(w) = wm.take("combiner.0.weight") {
-            combiner.layers[0].weight = w.transpose_last2();
-        } else if let Ok(w) = wm.take("combiner.weight") {
-            combiner.layers[0].weight = w.transpose_last2();
-        }
-        if let Ok(b) = wm.take("combiner.0.bias") {
-            combiner.layers[0].bias = b;
-        } else if let Ok(b) = wm.take("combiner.bias") {
-            combiner.layers[0].bias = b;
+        if let Some(mlp) = combiner.as_mlp_mut() {
+            if let Ok(w) = wm.take("combiner.0.weight") {
+                mlp.layers[0].weight = w.transpose_last2();
+            } else if let Ok(w) = wm.take("combiner.weight") {
+                mlp.layers[0].weight = w.transpose_last2();
+            }
+            if let Ok(b) = wm.take("combiner.0.bias") {
+                mlp.layers[0].bias = b;
+            } else if let Ok(b) = wm.take("combiner.bias") {
+                mlp.layers[0].bias = b;
+            }
         }
     }
 

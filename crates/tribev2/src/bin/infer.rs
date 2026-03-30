@@ -138,10 +138,24 @@ struct Args {
     verbose: bool,
 }
 
+/// Metadata sidecar for pre-extracted features (from extract_llama_features.py).
+#[derive(serde::Deserialize, Default)]
+#[allow(dead_code)]
+struct FeatureMeta {
+    #[serde(default)]
+    shape: Vec<usize>,
+    #[serde(default)]
+    n_layers: usize,
+    #[serde(default)]
+    hidden_dim: usize,
+    #[serde(default)]
+    n_timesteps: usize,
+}
+
 /// Load pre-extracted features from a binary f32 file.
 ///
-/// File format: flat f32 array, shape [n_layers * feature_dim * n_timesteps] or
-/// [feature_dim * n_timesteps] (single layer).
+/// File format: flat f32 array, shape [n_layers, feature_dim, n_timesteps].
+/// If a `.json` sidecar exists, reads shape metadata from it.
 ///
 /// Returns Tensor of shape [1, n_layers * feature_dim, n_timesteps] for model input.
 fn load_preextracted_features(
@@ -150,6 +164,23 @@ fn load_preextracted_features(
     feature_dim: usize,
     n_timesteps: usize,
 ) -> Result<Tensor> {
+    // Try to read sidecar metadata
+    let json_path = std::path::Path::new(path).with_extension("json");
+    let (n_l, dim, n_t) = if json_path.exists() {
+        let meta: FeatureMeta = serde_json::from_str(
+            &std::fs::read_to_string(&json_path)?
+        ).unwrap_or_default();
+        if meta.n_layers > 0 && meta.hidden_dim > 0 && meta.n_timesteps > 0 {
+            eprintln!("  Loaded metadata from {}: [{}, {}, {}]",
+                json_path.display(), meta.n_layers, meta.hidden_dim, meta.n_timesteps);
+            (meta.n_layers, meta.hidden_dim, meta.n_timesteps)
+        } else {
+            (n_layers, feature_dim, n_timesteps)
+        }
+    } else {
+        (n_layers, feature_dim, n_timesteps)
+    };
+
     let bytes = std::fs::read(path)
         .with_context(|| format!("failed to read features: {}", path))?;
     let data: Vec<f32> = bytes
@@ -157,17 +188,17 @@ fn load_preextracted_features(
         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
         .collect();
 
-    let expected = n_layers * feature_dim * n_timesteps;
+    let expected = n_l * dim * n_t;
     if data.len() != expected {
         anyhow::bail!(
             "Feature file {} has {} floats, expected {} ({} layers × {} dim × {} timesteps)",
-            path, data.len(), expected, n_layers, feature_dim, n_timesteps
+            path, data.len(), expected, n_l, dim, n_t
         );
     }
 
     // Reshape to [1, n_layers * feature_dim, n_timesteps]
     // Features are stored as [n_layers, feature_dim, n_timesteps] and we concatenate layers
-    Ok(Tensor::from_vec(data, vec![1, n_layers * feature_dim, n_timesteps]))
+    Ok(Tensor::from_vec(data, vec![1, n_l * dim, n_t]))
 }
 
 fn parse_cmap(s: &str) -> plotting::ColorMap {

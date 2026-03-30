@@ -7,6 +7,7 @@ pub mod encoder;
 pub mod projector;
 pub mod subject_layers;
 pub mod tribe;
+pub mod weights;
 
 #[cfg(feature = "wgpu-kernels-metal")]
 pub mod kernels;
