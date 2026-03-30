@@ -4,9 +4,14 @@ use super::scalenorm::ScaleNorm;
 use super::attention::Attention;
 use super::feedforward::FeedForward;
 use super::residual::Residual;
-use super::rotary::build_rotary_freqs;
 
-/// x_transformers Encoder: ('a','f') * depth + final_norm + RoPE.
+/// x_transformers Encoder — optimized for GPU throughput.
+///
+/// Optimizations over naive implementation:
+/// 1. Pre-computed RoPE cos/sin (1 compute, reused across 8 layers)
+/// 2. Fused QKV projection in attention (1 matmul vs 3)
+/// 3. ScaleNorm uses powf_scalar(-0.5) instead of sqrt+div
+/// 4. Minimal intermediate tensor allocations
 #[derive(Module, Debug)]
 pub struct XTransformerEncoder<B: Backend> {
     pub attn_norms: Vec<ScaleNorm<B>>,
@@ -54,32 +59,47 @@ impl<B: Backend> XTransformerEncoder<B> {
         }
     }
 
-    /// x: [B, N, D] → [B, N, D]
+    /// Forward pass with all optimizations.
+    ///
+    /// Key: compute RoPE cos/sin once, pass to all layers by reference.
+    /// Each layer: norm→attn→residual, norm→ff→residual (6 ops per layer).
     pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
         let n = x.dims()[1];
         let device = x.device();
+        let depth = self.attns.len();
 
-        let rotary_freqs = if self.rotary_dim > 0 {
-            Some(build_rotary_freqs::<B>(self.rotary_dim, n, &device))
+        // Pre-compute RoPE cos/sin ONCE
+        let (rot_cos, rot_sin) = if self.rotary_dim > 0 {
+            let half = self.rotary_dim / 2;
+            let mut freq_data = vec![0.0f32; n * half];
+            for pos in 0..n {
+                for j in 0..half {
+                    let inv_freq = 1.0 / 10000.0f64.powf(2.0 * j as f64 / self.rotary_dim as f64) as f32;
+                    freq_data[pos * half + j] = pos as f32 * inv_freq;
+                }
+            }
+            let freqs = Tensor::<B, 2>::from_data(
+                TensorData::new(freq_data, [n, half]), &device
+            );
+            (Some(freqs.clone().cos()), Some(freqs.sin()))
         } else {
-            None
+            (None, None)
         };
 
-        let depth = self.attns.len();
         let mut x = x;
 
         for i in 0..depth {
-            // Attention: pre_norm → attn → residual(out, inner)
+            // ── Attention block ───────────────────────────────────
             let inner = x.clone();
-            let normed = self.attn_norms[i].forward(x);
-            let attn_out = self.attns[i].forward(normed, rotary_freqs.as_ref());
-            x = self.attn_residuals[i].forward(attn_out, inner);
+            x = self.attn_norms[i].forward(x);
+            x = self.attns[i].forward(x, rot_cos.as_ref(), rot_sin.as_ref());
+            x = self.attn_residuals[i].forward(x, inner);
 
-            // FF: pre_norm → ff → residual(out, inner)
+            // ── FeedForward block ─────────────────────────────────
             let inner = x.clone();
-            let normed = self.ff_norms[i].forward(x);
-            let ff_out = self.ffs[i].forward(normed);
-            x = self.ff_residuals[i].forward(ff_out, inner);
+            x = self.ff_norms[i].forward(x);
+            x = self.ffs[i].forward(x);
+            x = self.ff_residuals[i].forward(x, inner);
         }
 
         self.final_norm.forward(x)

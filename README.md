@@ -199,9 +199,11 @@ Full forward pass: 1152-d, 8-layer transformer, 20,484 outputs, 100 timesteps, 3
 | Burn NdArray (Rayon) | 316 | 289 | 36 | 46× |
 | Burn NdArray + Accelerate | 143 | 135 | 9 | 102× |
 | Rust CPU (Accelerate BLAS) | 73 | 72 | 1 | 199× |
-| Python CPU (1 thread) | 57 | 56 | 1 | 257× |
-| **Burn wgpu (Metal GPU)** | **21.5** | **20.2** | **1.3** | **675×** |
-| Python MPS (GPU) | 11.9 | 11.6 | 0.1 | 1,225× |
+| Python CPU (1 thread) | 57 | 56 | 1 | 255× |
+| **Burn wgpu (Metal GPU)** | **20.3** | **19.6** | **0.4** | **715×** |
+| Python MPS (GPU) | 11.6 | 11.3 | 0.1 | 1,254× |
+
+*Burn wgpu uses cubecl flash attention + fused QKV + pre-computed RoPE. The 1.75× gap vs PyTorch MPS is from wgpu kernel dispatch overhead vs MPSGraph compiled execution.*
 
 ![GPU comparison](figures/bench_gpu.png)
 ![Speedup](figures/bench_speedup.png)
