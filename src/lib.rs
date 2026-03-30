@@ -24,18 +24,20 @@
 //! ## Quick start
 //!
 //! ```rust,ignore
-//! use tribev2_rs::model::tribe::TribeV2;
-//! use tribev2_rs::segments::{SegmentConfig, predict_segmented};
-//! use tribev2_rs::plotting::{self, PlotConfig, View, ColorMap};
+//! use tribev2::model::tribe::TribeV2;
+//! use tribev2::segments::{SegmentConfig, predict_segmented};
+//! use tribev2::plotting::{self, PlotConfig, View, ColorMap};
 //!
 //! let model = TribeV2::from_pretrained("config.yaml", "model.safetensors", Some("build_args.json"))?;
 //! let result = predict_segmented(&model, &features, &SegmentConfig::default());
-//! let brain = tribev2_rs::fsaverage::load_fsaverage("fsaverage5", "half", "sulcal", None)?;
+//! let brain = tribev2::fsaverage::load_fsaverage("fsaverage5", "half", "sulcal", None)?;
 //! let svg = plotting::render_brain_svg(&result.predictions[0], &brain, &PlotConfig::default());
 //! ```
 
 pub mod config;
 pub mod weights;
+#[cfg(feature = "hf-download")]
+pub mod download;
 pub mod tensor;
 pub mod model;
 pub mod model_burn;

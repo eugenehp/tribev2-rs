@@ -24,13 +24,13 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use clap::Parser;
 
-use tribev2_rs::config::{ModalityDims, TribeV2Config};
-use tribev2_rs::features::{self, LlamaFeatureConfig};
-use tribev2_rs::model::tribe::TribeV2;
-use tribev2_rs::plotting;
-use tribev2_rs::segments::{self, SegmentConfig};
-use tribev2_rs::tensor::Tensor;
-use tribev2_rs::weights::{WeightMap, load_weights};
+use tribev2::config::{ModalityDims, TribeV2Config};
+use tribev2::features::{self, LlamaFeatureConfig};
+use tribev2::model::tribe::TribeV2;
+use tribev2::plotting;
+use tribev2::segments::{self, SegmentConfig};
+use tribev2::tensor::Tensor;
+use tribev2::weights::{WeightMap, load_weights};
 
 #[derive(Parser, Debug)]
 #[command(about = "TRIBE v2 fMRI brain encoding model inference")]
@@ -212,7 +212,7 @@ fn main() -> Result<()> {
 
     // ── Build model ───────────────────────────────────────────────────
     let feature_dims = if let Some(ref ba_path) = args.build_args {
-        let ba = tribev2_rs::ModelBuildArgs::from_json(ba_path)?;
+        let ba = tribev2::ModelBuildArgs::from_json(ba_path)?;
         ba.to_modality_dims()
     } else {
         ModalityDims::pretrained()
@@ -408,7 +408,7 @@ fn main() -> Result<()> {
             .unwrap_or(plotting::View::Left);
 
         // Try to load real fsaverage mesh; fall back to synthetic
-        let brain = match tribev2_rs::fsaverage::load_fsaverage(
+        let brain = match tribev2::fsaverage::load_fsaverage(
             &args.mesh, "half", "sulcal", args.subjects_dir.as_deref(),
         ) {
             Ok(b) => {
