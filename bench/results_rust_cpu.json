@@ -1,1 +1,1 @@
-{"rust_cpu":{"mean_ms":13655.3,"min_ms":13501.2,"max_ms":13789.8,"std_ms":104.5,"n_runs":5,"output_shape":[1,20484,100]}}
+{"rust_cpu":{"mean_ms":14516.5,"min_ms":14350.2,"max_ms":15066.3,"std_ms":278.4,"n_runs":5,"output_shape":[1,20484,100]}}

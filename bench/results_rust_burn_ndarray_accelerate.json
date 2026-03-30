@@ -1,1 +1,1 @@
-{"rust_burn_ndarray_accelerate":{"mean_ms":901.9,"min_ms":895.6,"max_ms":916.9,"std_ms":7.7,"n_runs":5,"output_shape":[1,20484,100]}}
+{"rust_burn_ndarray_accelerate":{"mean_ms":946.3,"min_ms":929.6,"max_ms":958.4,"std_ms":9.3,"n_runs":5,"output_shape":[1,20484,100]}}

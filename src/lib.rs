@@ -24,15 +24,14 @@
 //! ## Quick start
 //!
 //! ```rust,ignore
-//! use tribev2_rs::{TribeV2, TribeV2Config};
-//! use tribev2_rs::features::{LlamaFeatureConfig, extract_llama_features};
+//! use tribev2_rs::model::tribe::TribeV2;
 //! use tribev2_rs::segments::{SegmentConfig, predict_segmented};
-//! use tribev2_rs::plotting::{PlotConfig, View, render_brain_svg, generate_test_mesh};
+//! use tribev2_rs::plotting::{self, PlotConfig, View, ColorMap};
 //!
-//! let model = TribeV2::from_pretrained("config.yaml", "model.safetensors", None)?;
-//! let feats = extract_llama_features(&config, "The quick brown fox", true)?;
-//! let preds = predict_segmented(&model, &features, &segment_config);
-//! let svg = render_brain_svg(&preds.predictions[0], &brain, &plot_config);
+//! let model = TribeV2::from_pretrained("config.yaml", "model.safetensors", Some("build_args.json"))?;
+//! let result = predict_segmented(&model, &features, &SegmentConfig::default());
+//! let brain = tribev2_rs::fsaverage::load_fsaverage("fsaverage5", "half", "sulcal", None)?;
+//! let svg = plotting::render_brain_svg(&result.predictions[0], &brain, &PlotConfig::default());
 //! ```
 
 pub mod config;

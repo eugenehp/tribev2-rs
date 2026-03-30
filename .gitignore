@@ -5,6 +5,7 @@ data/
 *.gguf
 *.bin
 *.png
+!figures/*.png
 *.npy
 *.pyc
 __pycache__/
