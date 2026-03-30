@@ -178,8 +178,10 @@ std::fs::write("brain.svg", &svg).unwrap();
 | `blas-accelerate` | + Apple Accelerate BLAS (fast on Apple Silicon) |
 | **Burn GPU** | |
 | `wgpu` | Burn wgpu backend — auto-detects Metal/Vulkan/DX12 |
-| `wgpu-metal` | + native Metal shaders (MSL) — fastest on macOS |
-| `wgpu-vulkan` | + native Vulkan shaders (SPIR-V) — fastest on Linux |
+| `wgpu-metal` | + native Metal MSL shaders — fastest on macOS (f32) |
+| `wgpu-metal-f16` | + Metal f16 dtype — Metal WMMA path, ~10% faster matmuls |
+| `wgpu-kernels-metal` | + fused CubeCL kernels (ScaleNorm + RoPE) — best on macOS |
+| `wgpu-vulkan` | + native Vulkan SPIR-V shaders — fastest on Linux/Windows |
 | **LLaMA GPU** | |
 | `llama-metal` | macOS Metal for LLaMA text extraction (default) |
 | `llama-cuda` | NVIDIA CUDA for LLaMA |
@@ -193,19 +195,37 @@ Full forward pass: 1152-d, 8-layer transformer, 20,484 outputs, 100 timesteps, 3
 
 ![Latency](figures/bench_latency.png)
 
-| Backend | Mean (ms) | Min (ms) | Std (ms) | Speedup |
-|---------|-----------|----------|----------|---------|
-| Rust CPU (naive loops) | 14,517 | 14,350 | 278 | 1× |
+| Backend | Mean (ms) | Min (ms) | Std (ms) | vs CPU naive |
+|---------|----------:|---------:|---------:|-------------:|
+| Rust CPU (naive loops) | 14 516 | 14 350 | 278 | 1× |
 | Burn NdArray (Rayon) | 316 | 289 | 36 | 46× |
 | Burn NdArray + Accelerate | 143 | 135 | 9 | 102× |
 | Rust CPU (Accelerate BLAS) | 73 | 72 | 1 | 199× |
-| Python CPU (1 thread) | 57 | 56 | 1 | 255× |
-| **Burn wgpu (Metal GPU)** | **20.3** | **19.6** | **0.4** | **715×** |
-| Python MPS (GPU) | 11.6 | 11.3 | 0.1 | 1,254× |
+| Python CPU (1 thread) | 58 | 56 | 1 | 252× |
+| Burn wgpu Metal f32 | 22.6 | 21.0 | 1.9 | 642× |
+| Burn wgpu Metal f16 | 20.5 | 19.1 | 1.4 | 708× |
+| **Burn wgpu Metal f32 + fused kernels** | **16.8** | **15.8** | **1.1** | **864×** |
+| Python MPS GPU | 12.2 | 11.6 | 0.6 | 1 192× |
 
-*Burn wgpu uses cubecl flash attention + fused QKV + pre-computed RoPE. The 1.75× gap vs PyTorch MPS is from wgpu kernel dispatch overhead vs MPSGraph compiled execution.*
+*Apple M-series · batch=1 · T=100 · 3 modalities · 20 484 cortical vertices.*
 
-![GPU comparison](figures/bench_gpu.png)
+### Optimisation journey (wgpu Metal)
+
+![Optimisation waterfall](figures/bench_optimization.png)
+
+| Step | Change | Δ ms |
+|------|--------|------:|
+| Original | — | 27.6 ms |
+| Non-causal attn · RoPE cache · `narrow` split · pre-transposed w\_avg\_t | architecture fixes | −5.0 ms |
+| f16 dtype | Metal WMMA path | −2.1 ms |
+| **Fused CubeCL kernels** (ScaleNorm `plane_sum` + single-pass RoPE) | custom kernels | −3.7 ms |
+| **Total** | | **16.8 ms** |
+
+The remaining **4.6 ms gap** vs Python MPS is MPSGraph graph-compilation:
+PyTorch replays a pre-compiled Metal command buffer; burn-wgpu re-records
+every call. Closing it requires a native MPSGraph backend.
+
+![GPU detail](figures/bench_gpu_detail.png)
 ![Speedup](figures/bench_speedup.png)
 
 ```bash
@@ -214,11 +234,21 @@ cargo run --release --example bench_burn
 cargo run --release --example bench_burn --features blas-accelerate
 cargo run --release --features accelerate --example bench_rust
 
-# GPU (macOS Metal)
-cargo run --release --example bench_burn --no-default-features --features wgpu-metal,llama-metal
+# GPU — macOS Metal (f32, default)
+cargo run --release --example bench_burn \
+  --no-default-features --features wgpu-metal,llama-metal
 
-# GPU (Linux Vulkan)
-cargo run --release --example bench_burn --no-default-features --features wgpu-vulkan
+# GPU — macOS Metal (f16, Metal WMMA)
+cargo run --release --example bench_burn \
+  --no-default-features --features wgpu-metal-f16,llama-metal
+
+# GPU — macOS Metal (fused CubeCL kernels, fastest)
+cargo run --release --example bench_burn \
+  --no-default-features --features wgpu-kernels-metal,llama-metal
+
+# GPU — Linux/Windows Vulkan
+cargo run --release --example bench_burn \
+  --no-default-features --features wgpu-vulkan
 ```
 
 ## Tests
