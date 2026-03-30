@@ -191,13 +191,20 @@ std::fs::write("brain.svg", &svg).unwrap();
 
 Full forward pass: 1152-d, 8-layer transformer, 20,484 outputs, 100 timesteps, 3 modalities.
 
-| Backend | Latency | Speedup |
-|---------|---------|---------|
-| Rust CPU (naive loops) | 14,517 ms | 1× |
-| Burn NdArray (Rayon) | 316 ms | 46× |
-| Burn NdArray + Accelerate | 143 ms | 102× |
-| Rust CPU (Accelerate BLAS) | 73 ms | 199× |
-| **Burn wgpu (Metal GPU)** | **21.5 ms** | **675×** |
+![Latency](figures/bench_latency.png)
+
+| Backend | Mean (ms) | Min (ms) | Std (ms) | Speedup |
+|---------|-----------|----------|----------|---------|
+| Rust CPU (naive loops) | 14,517 | 14,350 | 278 | 1× |
+| Burn NdArray (Rayon) | 316 | 289 | 36 | 46× |
+| Burn NdArray + Accelerate | 143 | 135 | 9 | 102× |
+| Rust CPU (Accelerate BLAS) | 73 | 72 | 1 | 199× |
+| Python CPU (1 thread) | 57 | 56 | 1 | 257× |
+| **Burn wgpu (Metal GPU)** | **21.5** | **20.2** | **1.3** | **675×** |
+| Python MPS (GPU) | 11.9 | 11.6 | 0.1 | 1,225× |
+
+![GPU comparison](figures/bench_gpu.png)
+![Speedup](figures/bench_speedup.png)
 
 ```bash
 # CPU

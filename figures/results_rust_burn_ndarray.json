@@ -1,1 +1,1 @@
-{"rust_burn_ndarray":{"mean_ms":1091.5,"min_ms":1086.4,"max_ms":1099.7,"std_ms":4.5,"n_runs":5,"output_shape":[1,20484,100]}}
+{"rust_burn_ndarray":{"mean_ms":316.2,"min_ms":289.2,"max_ms":386.3,"std_ms":36.3,"n_runs":5,"output_shape":[1,20484,100],"backend":"NdArray CPU (Rayon)"}}
