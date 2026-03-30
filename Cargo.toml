@@ -8,6 +8,9 @@ categories = ["science", "mathematics"]
 authors = ["Eugene Hauptmann"]
 license = "Apache-2.0"
 readme = "README.md"
+documentation = "https://docs.rs/tribev2"
+homepage = "https://github.com/eugenehp/tribev2-rs"
+repository = "https://github.com/eugenehp/tribev2-rs"
 
 exclude = ["data/", "figures/", "scripts/"]
 
