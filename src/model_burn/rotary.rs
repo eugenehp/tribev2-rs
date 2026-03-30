@@ -8,18 +8,17 @@ pub fn build_rotary_freqs<B: Backend>(
     device: &B::Device,
 ) -> Tensor<B, 2> {
     let half = dim / 2;
-    let inv_freq: Vec<f32> = (0..half)
-        .map(|i| 1.0 / 10000.0f64.powf(2.0 * i as f64 / dim as f64) as f32)
-        .collect();
-    let inv = Tensor::<B, 1>::from_data(TensorData::new(inv_freq, [half]), device);
-
-    let pos: Vec<f32> = (0..seq_len).map(|p| p as f32).collect();
-    let pos_t = Tensor::<B, 1>::from_data(TensorData::new(pos, [seq_len]), device);
-
-    // freqs = pos[:, None] * inv[None, :] => [seq_len, half]
-    let freqs = pos_t.unsqueeze_dim::<2>(1) * inv.unsqueeze_dim::<2>(0);
-    // cat duplicated: [seq_len, dim]
-    Tensor::cat(vec![freqs.clone(), freqs], 1)
+    // Precompute all freq values directly: freqs[pos, j] = pos * inv_freq[j % half]
+    let mut data = vec![0.0f32; seq_len * dim];
+    for pos in 0..seq_len {
+        for j in 0..half {
+            let inv_freq = 1.0 / 10000.0f64.powf(2.0 * j as f64 / dim as f64) as f32;
+            let val = pos as f32 * inv_freq;
+            data[pos * dim + j] = val;
+            data[pos * dim + half + j] = val; // duplicated
+        }
+    }
+    Tensor::<B, 2>::from_data(TensorData::new(data, [seq_len, dim]), device)
 }
 
 /// Apply rotary position embedding.
@@ -30,30 +29,25 @@ pub fn apply_rotary<B: Backend>(x: Tensor<B, 4>, freqs: &Tensor<B, 2>) -> Tensor
     let rot_dim = freqs.dims()[1];
     let half = rot_dim / 2;
 
+    // Split x into rotated and pass-through parts
     let x_rot = x.clone().slice([0..b, 0..h, 0..n, 0..rot_dim]);
-    let x_pass = if rot_dim < d {
-        Some(x.clone().slice([0..b, 0..h, 0..n, rot_dim..d]))
-    } else {
-        None
-    };
-
-    // Split rotated part into first/second half
     let x1 = x_rot.clone().slice([0..b, 0..h, 0..n, 0..half]);
     let x2 = x_rot.slice([0..b, 0..h, 0..n, half..rot_dim]);
 
-    // cos/sin from freqs [N, rot_dim]
-    let cos_f = freqs.clone().slice([0..n, 0..half]).cos()
-        .unsqueeze_dim::<3>(0).unsqueeze_dim::<4>(0); // [1, 1, N, half]
-    let sin_f = freqs.clone().slice([0..n, 0..half]).sin()
-        .unsqueeze_dim::<3>(0).unsqueeze_dim::<4>(0);
+    // freqs [N, rot_dim] → slice first half [N, half] → cos/sin → broadcast [1, 1, N, half]
+    let f_half = freqs.clone().slice([0..n, 0..half]);
+    let cos_f = f_half.clone().cos().unsqueeze_dim::<3>(0).unsqueeze_dim::<4>(0);
+    let sin_f = f_half.sin().unsqueeze_dim::<3>(0).unsqueeze_dim::<4>(0);
 
-    // rotate_half: [-x2, x1] pattern
+    // rotate_half pattern: [-x2, x1]
     let r1 = x1.clone() * cos_f.clone() - x2.clone() * sin_f.clone();
     let r2 = x2 * cos_f + x1 * sin_f;
     let rotated = Tensor::cat(vec![r1, r2], 3);
 
-    match x_pass {
-        Some(p) => Tensor::cat(vec![rotated, p], 3),
-        None => rotated,
+    if rot_dim < d {
+        let x_pass = x.slice([0..b, 0..h, 0..n, rot_dim..d]);
+        Tensor::cat(vec![rotated, x_pass], 3)
+    } else {
+        rotated
     }
 }

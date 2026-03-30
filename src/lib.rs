@@ -15,16 +15,24 @@
 //!    low-rank head, per-subject prediction layers, adaptive average pooling)
 //! - Weight loading from the official PyTorch Lightning checkpoint
 //! - Text feature extraction via `llama-cpp-4` (LLaMA 3.2-3B GGUF)
+//!   with intermediate layer activation extraction
+//! - Segment-based batching for long-form inference
+//! - Multi-modal inference (text + audio + video)
+//! - Brain surface visualization (SVG rendering)
 //! - HuggingFace Hub download support
 //!
 //! ## Quick start
 //!
 //! ```rust,ignore
 //! use tribev2_rs::{TribeV2, TribeV2Config};
+//! use tribev2_rs::features::{LlamaFeatureConfig, extract_llama_features};
+//! use tribev2_rs::segments::{SegmentConfig, predict_segmented};
+//! use tribev2_rs::plotting::{PlotConfig, View, render_brain_svg, generate_test_mesh};
 //!
-//! let model = TribeV2::from_pretrained("facebook/tribev2", None)?;
-//! let text_features: Vec<Vec<f32>> = extract_llama_features(...);
-//! let preds = model.predict_from_text_features(&text_features, n_timesteps)?;
+//! let model = TribeV2::from_pretrained("config.yaml", "model.safetensors", None)?;
+//! let feats = extract_llama_features(&config, "The quick brown fox", true)?;
+//! let preds = predict_segmented(&model, &features, &segment_config);
+//! let svg = render_brain_svg(&preds.predictions[0], &brain, &plot_config);
 //! ```
 
 pub mod config;
@@ -32,9 +40,19 @@ pub mod weights;
 pub mod tensor;
 pub mod model;
 pub mod model_burn;
+pub mod features;
+pub mod segments;
+pub mod plotting;
+pub mod fsaverage;
+pub mod events;
 
 // Flat re-exports
 pub use config::{TribeV2Config, EncoderConfig, SubjectLayersConfig, ModalityDims, ModelBuildArgs};
 pub use model::tribe::TribeV2;
 pub use weights::{WeightMap, load_checkpoint};
 pub use tensor::Tensor;
+pub use features::{ExtractedFeatures, LlamaFeatureConfig, extract_llama_features, extract_llama_features_timed, zero_features, resample_features};
+pub use segments::{Segment, SegmentConfig, SegmentedPrediction, predict_segmented, predict_segments_batched};
+pub use plotting::{BrainMesh, PlotConfig, View, ColorMap, render_brain_svg, render_hemisphere_svg, render_multi_view, render_timesteps};
+pub use fsaverage::{load_fsaverage, find_fsaverage_dir, fsaverage_size};
+pub use events::{Event, EventList, build_events_from_media, text_to_events, transcribe_audio};

@@ -1,1 +1,11 @@
 target/
+data/
+*.safetensors
+*.ckpt
+*.gguf
+*.bin
+*.png
+*.npy
+*.pyc
+__pycache__/
+.DS_Store

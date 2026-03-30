@@ -206,9 +206,14 @@ impl TribeV2 {
         let yaml = std::fs::read_to_string(config_path)?;
         let mut config: TribeV2Config = serde_yaml::from_str(&yaml)?;
 
-        // 2. Set average_subjects = true (mirrors Python from_pretrained)
+        // 2. Set average_subjects = true, n_subjects = 0 (mirrors Python from_pretrained)
+        //    When average_subjects is set, Python uses the dropout subject row.
+        //    The saved checkpoint already has averaged weights → 1 subject row.
+        //    Setting n_subjects = 0 means num_weight_subjects = 0 + 1 = 1,
+        //    and the dropout/average subject is at index 0.
         if let Some(ref mut sl) = config.brain_model_config.subject_layers {
             sl.average_subjects = true;
+            sl.n_subjects = 0;
         }
 
         // 3. Determine feature_dims, n_outputs, n_output_timesteps

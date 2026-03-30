@@ -17,11 +17,10 @@ impl<B: Backend> ScaleNorm<B> {
     }
 
     pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
-        let [_b, _n, _d] = x.dims();
-        // L2 norm over last dim
-        let norm = x.clone().powf_scalar(2.0).sum_dim(2).sqrt().clamp_min(1e-12);
-        let normalized = x / norm;
-        let g_val = self.g.val();
-        normalized.mul_scalar(self.scale) * g_val.unsqueeze_dim::<2>(0).unsqueeze_dim::<3>(0)
+        // L2 norm: sqrt(sum(x^2, dim=-1, keepdim=True)).clamp(min=1e-12)
+        let norm = (x.clone() * x.clone()).sum_dim(2).sqrt().clamp_min(1e-12);
+        // normalize then scale
+        let g_val = self.g.val().reshape([1, 1, 1]); // [1,1,1] broadcast
+        (x / norm).mul_scalar(self.scale) * g_val
     }
 }

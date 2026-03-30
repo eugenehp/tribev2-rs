@@ -69,13 +69,13 @@ impl<B: Backend> XTransformerEncoder<B> {
         let mut x = x;
 
         for i in 0..depth {
-            // Attention block
+            // Attention: pre_norm → attn → residual(out, inner)
             let inner = x.clone();
             let normed = self.attn_norms[i].forward(x);
             let attn_out = self.attns[i].forward(normed, rotary_freqs.as_ref());
             x = self.attn_residuals[i].forward(attn_out, inner);
 
-            // FF block
+            // FF: pre_norm → ff → residual(out, inner)
             let inner = x.clone();
             let normed = self.ff_norms[i].forward(x);
             let ff_out = self.ffs[i].forward(normed);

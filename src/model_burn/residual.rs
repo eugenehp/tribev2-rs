@@ -18,13 +18,15 @@ impl<B: Backend> Residual<B> {
         }
     }
 
-    /// x + residual * scale
+    /// x + residual * scale. Consumes both inputs to avoid copies.
     pub fn forward(&self, x: Tensor<B, 3>, residual: Tensor<B, 3>) -> Tensor<B, 3> {
-        let r = if let Some(ref scale) = self.residual_scale {
-            residual * scale.val().unsqueeze_dim::<2>(0).unsqueeze_dim::<3>(0)
-        } else {
-            residual
-        };
-        x + r
+        match &self.residual_scale {
+            Some(scale) => {
+                // scale: [D] → [1, 1, D] broadcast
+                let s = scale.val().unsqueeze_dim::<2>(0).unsqueeze_dim::<3>(0);
+                x + residual * s
+            }
+            None => x + residual,
+        }
     }
 }

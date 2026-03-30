@@ -1,1 +1,1 @@
-{"rust_burn_wgpu_metal":{"mean_ms":24.7,"min_ms":18.9,"max_ms":39.5,"std_ms":7.5,"n_runs":5,"output_shape":[1,20484,100]}}
+{"rust_burn_wgpu_metal":{"mean_ms":24.3,"min_ms":18.6,"max_ms":41.9,"std_ms":8.8,"n_runs":5,"output_shape":[1,20484,100]}}
