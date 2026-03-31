@@ -1,6 +1,6 @@
 [package]
 name = "tribev2"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 description = "TRIBE v2 — multimodal fMRI brain encoding model inference in Rust"
 keywords = ["fmri", "neuroscience", "multimodal", "brain-encoding", "llama"]

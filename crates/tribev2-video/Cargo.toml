@@ -1,6 +1,6 @@
 [package]
 name = "tribev2-video"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 description = "V-JEPA2 ViT-G video feature extraction for TRIBE v2 (burn backend)"
 keywords = ["fmri", "video", "vjepa", "feature-extraction"]
