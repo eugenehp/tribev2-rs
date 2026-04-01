@@ -152,6 +152,10 @@ struct Args {
     #[arg(long, default_value = "2.0")]
     nifti_voxel_size: f32,
 
+    /// NIfTI Gaussian smoothing FWHM in mm (0=none). Default: 6.0
+    #[arg(long, default_value = "6.0")]
+    nifti_smooth: f32,
+
     /// Print top-k ROI summary (HCP-MMP1 parcellation)
     #[arg(long)]
     roi_summary: Option<usize>,
@@ -722,6 +726,7 @@ fn main() -> Result<()> {
             dims: (args.nifti_dim, args.nifti_dim, args.nifti_dim),
             voxel_size: args.nifti_voxel_size,
             compress: nifti_path.ends_with(".gz"),
+            smooth_fwhm_mm: args.nifti_smooth,
             ..Default::default()
         };
 

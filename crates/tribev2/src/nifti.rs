@@ -29,6 +29,9 @@ pub struct NiftiConfig {
     pub origin_mm: (f32, f32, f32),
     /// Whether to gzip compress the output (.nii.gz vs .nii).
     pub compress: bool,
+    /// Gaussian smoothing FWHM in mm (0 = no smoothing). Default: 6.0.
+    /// Applied after surface-to-volume scatter to fill the cortical ribbon.
+    pub smooth_fwhm_mm: f32,
 }
 
 impl Default for NiftiConfig {
@@ -41,6 +44,7 @@ impl Default for NiftiConfig {
             // We offset so that MNI (0,0,0) is near the center.
             origin_mm: (90.0, 126.0, 72.0),
             compress: true,
+            smooth_fwhm_mm: 6.0,
         }
     }
 }
@@ -169,7 +173,13 @@ pub fn mni_to_voxel(
 /// `config`: volume configuration.
 ///
 /// Returns a flat f32 volume of size `nx * ny * nz` in row-major order.
-/// Multiple vertices mapping to the same voxel are averaged.
+///
+/// The projection works in two stages:
+/// 1. **Scatter**: each vertex is mapped to its nearest voxel (multiple vertices
+///    in the same voxel are averaged).
+/// 2. **Smooth + fill**: a 3D Gaussian kernel (FWHM from config) is applied to
+///    spread each scattered point into a filled cortical ribbon. A distance mask
+///    ensures only voxels within ~2× the smoothing radius of a vertex are filled.
 pub fn surface_to_volume(
     vertex_values: &[f32],
     vertex_coords: &[f32],
@@ -201,7 +211,146 @@ pub fn surface_to_volume(
         }
     }
 
+    // Apply Gaussian smoothing to fill the cortical ribbon
+    if config.smooth_fwhm_mm > 0.0 {
+        let sigma_voxels = config.smooth_fwhm_mm / (2.355 * config.voxel_size);
+        volume = gaussian_smooth_3d_masked(&volume, &counts, nx, ny, nz, sigma_voxels);
+    }
+
     volume
+}
+
+/// 3D Gaussian smoothing with cortical mask.
+///
+/// Only voxels near the original scattered vertices get filled.
+/// Uses separable convolution (3 × 1D passes) for efficiency.
+fn gaussian_smooth_3d_masked(
+    volume: &[f32],
+    scatter_counts: &[u32],
+    nx: usize, ny: usize, nz: usize,
+    sigma: f32,
+) -> Vec<f32> {
+    // Build a distance mask: for each voxel, the squared distance (in voxels)
+    // to the nearest scattered vertex. Only fill within radius = 3*sigma.
+    let radius = (3.0 * sigma).ceil() as isize;
+    let n_voxels = nx * ny * nz;
+
+    // Build mask of voxels within radius of any scattered vertex
+    let mut mask = vec![false; n_voxels];
+    for k in 0..nz {
+        for j in 0..ny {
+            for i in 0..nx {
+                let idx = i + j * nx + k * nx * ny;
+                if scatter_counts[idx] > 0 {
+                    // Mark neighborhood
+                    for dk in -radius..=radius {
+                        let kk = k as isize + dk;
+                        if kk < 0 || kk >= nz as isize { continue; }
+                        for dj in -radius..=radius {
+                            let jj = j as isize + dj;
+                            if jj < 0 || jj >= ny as isize { continue; }
+                            for di in -radius..=radius {
+                                let ii = i as isize + di;
+                                if ii < 0 || ii >= nx as isize { continue; }
+                                let dist_sq = (di * di + dj * dj + dk * dk) as f32;
+                                if dist_sq <= (radius * radius) as f32 {
+                                    let midx = ii as usize + jj as usize * nx + kk as usize * nx * ny;
+                                    mask[midx] = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Build 1D Gaussian kernel
+    let ksize = (2 * radius + 1) as usize;
+    let mut kernel = vec![0.0f32; ksize];
+    let mut ksum = 0.0f32;
+    for i in 0..ksize {
+        let x = i as f32 - radius as f32;
+        let v = (-0.5 * (x / sigma) * (x / sigma)).exp();
+        kernel[i] = v;
+        ksum += v;
+    }
+    for v in &mut kernel { *v /= ksum; }
+
+    // Separable 3-pass Gaussian: X, Y, Z
+    let mut buf = volume.to_vec();
+    let mut tmp = vec![0.0f32; n_voxels];
+
+    // Pass 1: convolve along X
+    for k in 0..nz {
+        for j in 0..ny {
+            for i in 0..nx {
+                let mut sum = 0.0f32;
+                let mut wsum = 0.0f32;
+                for ki in 0..ksize {
+                    let ii = i as isize + ki as isize - radius;
+                    if ii >= 0 && ii < nx as isize {
+                        let src = ii as usize + j * nx + k * nx * ny;
+                        let w = kernel[ki];
+                        sum += buf[src] * w;
+                        wsum += w;
+                    }
+                }
+                tmp[i + j * nx + k * nx * ny] = if wsum > 0.0 { sum / wsum } else { 0.0 };
+            }
+        }
+    }
+    std::mem::swap(&mut buf, &mut tmp);
+
+    // Pass 2: convolve along Y
+    for k in 0..nz {
+        for j in 0..ny {
+            for i in 0..nx {
+                let mut sum = 0.0f32;
+                let mut wsum = 0.0f32;
+                for ki in 0..ksize {
+                    let jj = j as isize + ki as isize - radius;
+                    if jj >= 0 && jj < ny as isize {
+                        let src = i + jj as usize * nx + k * nx * ny;
+                        let w = kernel[ki];
+                        sum += buf[src] * w;
+                        wsum += w;
+                    }
+                }
+                tmp[i + j * nx + k * nx * ny] = if wsum > 0.0 { sum / wsum } else { 0.0 };
+            }
+        }
+    }
+    std::mem::swap(&mut buf, &mut tmp);
+
+    // Pass 3: convolve along Z
+    for k in 0..nz {
+        for j in 0..ny {
+            for i in 0..nx {
+                let mut sum = 0.0f32;
+                let mut wsum = 0.0f32;
+                for ki in 0..ksize {
+                    let kk = k as isize + ki as isize - radius;
+                    if kk >= 0 && kk < nz as isize {
+                        let src = i + j * nx + kk as usize * nx * ny;
+                        let w = kernel[ki];
+                        sum += buf[src] * w;
+                        wsum += w;
+                    }
+                }
+                tmp[i + j * nx + k * nx * ny] = if wsum > 0.0 { sum / wsum } else { 0.0 };
+            }
+        }
+    }
+
+    // Apply mask: zero out voxels far from any vertex
+    for i in 0..n_voxels {
+        if !mask[i] {
+            tmp[i] = 0.0;
+        }
+    }
+
+    tmp
 }
 
 /// Get combined vertex coordinates from a BrainMesh (left + right hemispheres).
@@ -394,6 +543,7 @@ mod tests {
             voxel_size: 1.0,
             origin_mm: (5.0, 5.0, 5.0),
             compress: false,
+            smooth_fwhm_mm: 0.0, // no smoothing for basic test
         };
         // Single vertex at MNI (0,0,0) → voxel (5,5,5)
         let coords = vec![0.0, 0.0, 0.0];
@@ -405,12 +555,37 @@ mod tests {
     }
 
     #[test]
+    fn test_surface_to_volume_smoothed() {
+        let config = NiftiConfig {
+            dims: (20, 20, 20),
+            voxel_size: 1.0,
+            origin_mm: (10.0, 10.0, 10.0),
+            compress: false,
+            smooth_fwhm_mm: 3.0,
+        };
+        // Single vertex at MNI (0,0,0) → voxel (10,10,10)
+        let coords = vec![0.0, 0.0, 0.0];
+        let values = vec![42.0];
+        let vol = surface_to_volume(&values, &coords, &config);
+        let idx_center = 10 + 10 * 20 + 10 * 20 * 20;
+        // Center voxel should have the strongest value
+        assert!(vol[idx_center] > 0.0, "center voxel should be > 0");
+        // Neighbor should also have nonzero value (smoothing spread)
+        let idx_neighbor = 11 + 10 * 20 + 10 * 20 * 20;
+        assert!(vol[idx_neighbor] > 0.0, "neighbor should be > 0 after smoothing");
+        // Far-away voxel should be zero (masked)
+        let idx_far = 0 + 0 * 20 + 0 * 20 * 20;
+        assert_eq!(vol[idx_far], 0.0, "far voxel should be 0");
+    }
+
+    #[test]
     fn test_write_nifti_roundtrip() {
         let config = NiftiConfig {
             dims: (4, 4, 4),
             voxel_size: 2.0,
             origin_mm: (4.0, 4.0, 4.0),
             compress: false,
+            smooth_fwhm_mm: 0.0,
         };
         let volume = vec![1.0f32; 64];
         let dir = tempfile::tempdir().unwrap();
