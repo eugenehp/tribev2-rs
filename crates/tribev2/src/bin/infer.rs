@@ -67,6 +67,22 @@ struct Args {
     #[arg(long, default_value = "0.5,0.75,1.0")]
     layer_positions: String,
 
+    /// Path to a video file — end-to-end pipeline (extracts audio, transcribes, extracts features)
+    #[arg(long)]
+    video_path: Option<String>,
+
+    /// Path to an audio file — end-to-end pipeline (transcribes, extracts features)
+    #[arg(long)]
+    audio_path: Option<String>,
+
+    /// Path to a text file — end-to-end pipeline (TTS → audio → transcribe → features)
+    #[arg(long)]
+    text_path: Option<String>,
+
+    /// Cache directory for intermediate files (TTS audio, transcription, etc.)
+    #[arg(long, default_value = "./cache")]
+    cache_dir: String,
+
     /// Path to pre-extracted text features (binary f32, [n_timesteps, feature_dim])
     #[arg(long)]
     text_features: Option<String>,
@@ -203,6 +219,18 @@ struct Args {
     /// Resample output to a different fsaverage resolution
     #[arg(long)]
     output_mesh: Option<String>,
+
+    /// Generate stimulus-aligned HTML visualization
+    #[arg(long)]
+    stimulus_html: Option<String>,
+
+    /// Load ground-truth fMRI from NIfTI and project to surface (vol-to-surf)
+    #[arg(long)]
+    fmri_input: Option<String>,
+
+    /// Vol-to-surf sampling radius in mm (default: 3.0)
+    #[arg(long, default_value = "3.0")]
+    vol_to_surf_radius: f32,
 
     /// Backend: "cpu" (pure-Rust), "burn-cpu" (Burn NdArray), "burn-gpu" (Burn wgpu Metal/Vulkan)
     #[arg(long, default_value = "cpu")]
@@ -488,6 +516,66 @@ fn main() -> Result<()> {
 
     eprintln!("Weights loaded ({:.0} ms), backend={}", t1.elapsed().as_secs_f64() * 1000.0, args.backend);
 
+    // ── End-to-end pipeline (--video-path / --audio-path / --text-path) ───
+    let has_media_input = args.video_path.is_some() || args.audio_path.is_some() || args.text_path.is_some();
+    let mut pipeline_output: Option<tribev2::pipeline::PipelineOutput> = None;
+    let mut pipeline_events: Option<tribev2::events::EventList> = None;
+    let mut pipeline_duration: f64 = 0.0;
+
+    if has_media_input {
+        let pipe_input = tribev2::pipeline::PipelineInput {
+            video_path: args.video_path.clone(),
+            audio_path: args.audio_path.clone(),
+            text_path: args.text_path.clone(),
+            text: args.prompt.clone(),
+            llama_model: args.llama_model.clone(),
+            text_features_path: args.text_features.clone(),
+            audio_features_path: args.audio_features.clone(),
+            video_features_path: args.video_features.clone(),
+            cache_dir: args.cache_dir.clone(),
+        };
+        let pipe_config = tribev2::pipeline::PipelineConfig {
+            layer_positions: layer_positions.clone(),
+            frequency: 2.0,
+            remove_empty_segments: args.remove_empty,
+            segment_duration: args.segment_duration,
+            verbose: args.verbose,
+        };
+        let result = tribev2::pipeline::predict_from_media(&model, &pipe_input, &pipe_config)?;
+        pipeline_duration = result.duration_secs;
+        pipeline_events = Some(result.events.clone());
+        pipeline_output = Some(result);
+    }
+
+    // ── Load fMRI NIfTI via vol-to-surf (--fmri-input) ──────────────────
+    if let Some(ref fmri_path) = args.fmri_input {
+        eprintln!("Loading fMRI volume and projecting to surface...");
+        let vol = tribev2::vol_to_surf::NiftiVolume::load(fmri_path)?;
+        eprintln!("  Volume shape: {:?}", vol.shape);
+
+        let pial_coords = tribev2::nifti::load_pial_coords_mni(
+            &args.mesh, args.subjects_dir.as_deref(),
+        ).with_context(|| "Need fsaverage mesh for vol-to-surf")?;
+
+        let v2s_config = tribev2::vol_to_surf::VolToSurfConfig {
+            kind: tribev2::vol_to_surf::SamplingKind::Ball { radius: args.vol_to_surf_radius },
+            interpolation: tribev2::vol_to_surf::Interpolation::Linear,
+            ..Default::default()
+        };
+
+        let surf_data = tribev2::vol_to_surf::vol_to_surf_4d(&vol, &pial_coords, None, &v2s_config);
+        eprintln!("  Projected: {} timepoints × {} vertices", surf_data.len(), surf_data.first().map_or(0, |v| v.len()));
+
+        // Save as binary f32
+        let out_path = fmri_path.replace(".nii", "_surface").replace(".gz", "") + ".bin";
+        let n_v = surf_data.first().map_or(0, |v| v.len());
+        let mut flat = Vec::with_capacity(surf_data.len() * n_v);
+        for row in &surf_data { flat.extend_from_slice(row); }
+        let bytes: Vec<u8> = flat.iter().flat_map(|f| f.to_le_bytes()).collect();
+        std::fs::write(&out_path, &bytes)?;
+        eprintln!("  Surface data saved to {}", out_path);
+    }
+
     // ── Extract / load features ───────────────────────────────────────
     let n_timesteps = args.n_timesteps;
     let mut features = BTreeMap::new();
@@ -578,7 +666,11 @@ fn main() -> Result<()> {
 
     let subject_ids: Option<Vec<usize>> = args.subject.map(|s| vec![s]);
 
-    if args.segment {
+    if let Some(ref po) = pipeline_output {
+        // Pipeline already ran inference
+        predictions = po.predictions.clone();
+        n_pred_timesteps = predictions.len();
+    } else if args.segment {
         // Segment-based inference (always uses pure-Rust backend)
         let seg_config = SegmentConfig {
             duration_trs: args.segment_duration,
@@ -976,6 +1068,56 @@ fn main() -> Result<()> {
                 eprintln!("Resampling failed: {}. Requires FreeSurfer mesh data.", e);
             }
         }
+    }
+
+    // ── Stimulus-aligned visualization ────────────────────────────────
+    if let Some(ref html_path) = args.stimulus_html {
+        eprintln!("Generating stimulus-aligned HTML...");
+
+        let view = plotting::View::from_str(&args.view)
+            .unwrap_or(plotting::View::Left);
+        let brain = match tribev2::fsaverage::load_fsaverage(
+            &args.mesh, "half", "sulcal", args.subjects_dir.as_deref(),
+        ) {
+            Ok(b) => b,
+            Err(_) => plotting::generate_test_mesh(5000),
+        };
+        let plot_config = plotting::PlotConfig {
+            width: 400,
+            height: 300,
+            cmap: parse_cmap(&args.cmap),
+            view,
+            colorbar: false,
+            symmetric_cbar: false,
+            ..Default::default()
+        };
+
+        // Render brain SVGs
+        let max_frames = predictions.len().min(50); // limit for HTML size
+        let brain_svgs: Vec<String> = predictions[..max_frames].iter()
+            .map(|pred| plotting::render_brain_svg(pred, &brain, &plot_config))
+            .collect();
+
+        // Extract video frames if available
+        let video_frame_paths = if let Some(ref vp) = args.video_path {
+            let stim_dir = std::path::Path::new(html_path).parent()
+                .unwrap_or(std::path::Path::new(".")).join("stimulus_frames");
+            let timestamps: Vec<f64> = (0..max_frames).map(|i| i as f64 * 0.5).collect();
+            plotting::extract_stimulus_frames(vp, &timestamps, &stim_dir.to_string_lossy()).ok()
+        } else {
+            None
+        };
+
+        // Build stimulus frames
+        let events = pipeline_events.as_ref().cloned()
+            .unwrap_or_else(tribev2::events::EventList::new);
+        let duration = if pipeline_duration > 0.0 { pipeline_duration } else { max_frames as f64 * 0.5 };
+        let stimuli = plotting::build_stimulus_frames(
+            &events, max_frames, duration, video_frame_paths.as_deref(),
+        );
+
+        plotting::render_timesteps_with_stimuli(&brain_svgs, &stimuli, html_path)?;
+        eprintln!("Stimulus-aligned HTML saved to {} ({} frames)", html_path, max_frames);
     }
 
     let total_ms = t0.elapsed().as_secs_f64() * 1000.0;

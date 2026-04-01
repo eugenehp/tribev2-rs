@@ -52,6 +52,8 @@ pub mod metrics;
 pub mod subcortical;
 pub mod video_output;
 pub mod resample;
+pub mod pipeline;
+pub mod vol_to_surf;
 
 // Flat re-exports
 pub use config::{TribeV2Config, EncoderConfig, SubjectLayersConfig, ModalityDims, ModelBuildArgs};
@@ -69,3 +71,5 @@ pub use metrics::{pearson_r, pearson_per_vertex, mean_pearson, median_pearson, m
 pub use subcortical::{SubcorticalConfig, get_subcortical_labels, get_subcortical_roi_indices, summarize_subcortical};
 pub use video_output::{VideoConfig, render_mp4, render_gif};
 pub use resample::{resample_surface, compute_resampling_map, ResamplingMap};
+pub use pipeline::{PipelineInput, PipelineConfig, PipelineOutput, predict_from_media, text_to_speech};
+pub use vol_to_surf::{NiftiVolume, VolToSurfConfig, SamplingKind, Interpolation, vol_to_surf, vol_to_surf_4d};

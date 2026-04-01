@@ -220,42 +220,58 @@ pub fn surface_to_volume(
     volume
 }
 
-/// 3D Gaussian smoothing with cortical mask.
+/// 3D Gaussian smoothing via normalized convolution.
 ///
-/// Only voxels near the original scattered vertices get filled.
-/// Uses separable convolution (3 × 1D passes) for efficiency.
+/// Smoothes both the signal and a binary indicator of where data exists,
+/// then divides: `result = smooth(signal) / smooth(indicator)`. This
+/// preserves signal amplitude near the cortical ribbon instead of
+/// diluting it with surrounding zeros.
+///
+/// Only voxels within `3×sigma` of a scattered vertex receive values.
 fn gaussian_smooth_3d_masked(
     volume: &[f32],
     scatter_counts: &[u32],
     nx: usize, ny: usize, nz: usize,
     sigma: f32,
 ) -> Vec<f32> {
-    // Build a distance mask: for each voxel, the squared distance (in voxels)
-    // to the nearest scattered vertex. Only fill within radius = 3*sigma.
     let radius = (3.0 * sigma).ceil() as isize;
     let n_voxels = nx * ny * nz;
 
-    // Build mask of voxels within radius of any scattered vertex
+    // indicator[i] = 1 where we have scattered data, 0 elsewhere
+    let indicator: Vec<f32> = scatter_counts.iter()
+        .map(|&c| if c > 0 { 1.0 } else { 0.0 })
+        .collect();
+
+    // Build 1D Gaussian kernel (unnormalized — normalization happens via division)
+    let ksize = (2 * radius + 1) as usize;
+    let mut kernel = vec![0.0f32; ksize];
+    for i in 0..ksize {
+        let x = i as f32 - radius as f32;
+        kernel[i] = (-0.5 * (x / sigma) * (x / sigma)).exp();
+    }
+
+    // Smooth both signal and indicator with the same separable Gaussian
+    let smooth_signal = separable_convolve_3d(volume, nx, ny, nz, &kernel, radius);
+    let smooth_indicator = separable_convolve_3d(&indicator, nx, ny, nz, &kernel, radius);
+
+    // Build distance mask: only fill voxels within radius of data
     let mut mask = vec![false; n_voxels];
     for k in 0..nz {
         for j in 0..ny {
             for i in 0..nx {
-                let idx = i + j * nx + k * nx * ny;
-                if scatter_counts[idx] > 0 {
-                    // Mark neighborhood
-                    for dk in -radius..=radius {
+                if scatter_counts[i + j * nx + k * nx * ny] > 0 {
+                    let r = radius;
+                    for dk in -r..=r {
                         let kk = k as isize + dk;
                         if kk < 0 || kk >= nz as isize { continue; }
-                        for dj in -radius..=radius {
+                        for dj in -r..=r {
                             let jj = j as isize + dj;
                             if jj < 0 || jj >= ny as isize { continue; }
-                            for di in -radius..=radius {
+                            for di in -r..=r {
                                 let ii = i as isize + di;
                                 if ii < 0 || ii >= nx as isize { continue; }
-                                let dist_sq = (di * di + dj * dj + dk * dk) as f32;
-                                if dist_sq <= (radius * radius) as f32 {
-                                    let midx = ii as usize + jj as usize * nx + kk as usize * nx * ny;
-                                    mask[midx] = true;
+                                if (di*di + dj*dj + dk*dk) as f32 <= (r*r) as f32 {
+                                    mask[ii as usize + jj as usize * nx + kk as usize * nx * ny] = true;
                                 }
                             }
                         }
@@ -265,88 +281,75 @@ fn gaussian_smooth_3d_masked(
         }
     }
 
-    // Build 1D Gaussian kernel
-    let ksize = (2 * radius + 1) as usize;
-    let mut kernel = vec![0.0f32; ksize];
-    let mut ksum = 0.0f32;
-    for i in 0..ksize {
-        let x = i as f32 - radius as f32;
-        let v = (-0.5 * (x / sigma) * (x / sigma)).exp();
-        kernel[i] = v;
-        ksum += v;
+    // Normalized convolution: signal / indicator, masked
+    let mut result = vec![0.0f32; n_voxels];
+    for i in 0..n_voxels {
+        if mask[i] && smooth_indicator[i] > 1e-8 {
+            result[i] = smooth_signal[i] / smooth_indicator[i];
+        }
     }
-    for v in &mut kernel { *v /= ksum; }
+    result
+}
 
-    // Separable 3-pass Gaussian: X, Y, Z
-    let mut buf = volume.to_vec();
-    let mut tmp = vec![0.0f32; n_voxels];
+/// Separable 3-pass 1D Gaussian convolution on a 3D volume.
+fn separable_convolve_3d(
+    input: &[f32],
+    nx: usize, ny: usize, nz: usize,
+    kernel: &[f32],
+    radius: isize,
+) -> Vec<f32> {
+    let n = nx * ny * nz;
+    let ksize = kernel.len();
+    let mut buf = input.to_vec();
+    let mut tmp = vec![0.0f32; n];
 
-    // Pass 1: convolve along X
+    // Pass 1: X
     for k in 0..nz {
         for j in 0..ny {
             for i in 0..nx {
                 let mut sum = 0.0f32;
-                let mut wsum = 0.0f32;
                 for ki in 0..ksize {
                     let ii = i as isize + ki as isize - radius;
                     if ii >= 0 && ii < nx as isize {
-                        let src = ii as usize + j * nx + k * nx * ny;
-                        let w = kernel[ki];
-                        sum += buf[src] * w;
-                        wsum += w;
+                        sum += buf[ii as usize + j * nx + k * nx * ny] * kernel[ki];
                     }
                 }
-                tmp[i + j * nx + k * nx * ny] = if wsum > 0.0 { sum / wsum } else { 0.0 };
+                tmp[i + j * nx + k * nx * ny] = sum;
             }
         }
     }
     std::mem::swap(&mut buf, &mut tmp);
 
-    // Pass 2: convolve along Y
+    // Pass 2: Y
     for k in 0..nz {
         for j in 0..ny {
             for i in 0..nx {
                 let mut sum = 0.0f32;
-                let mut wsum = 0.0f32;
                 for ki in 0..ksize {
                     let jj = j as isize + ki as isize - radius;
                     if jj >= 0 && jj < ny as isize {
-                        let src = i + jj as usize * nx + k * nx * ny;
-                        let w = kernel[ki];
-                        sum += buf[src] * w;
-                        wsum += w;
+                        sum += buf[i + jj as usize * nx + k * nx * ny] * kernel[ki];
                     }
                 }
-                tmp[i + j * nx + k * nx * ny] = if wsum > 0.0 { sum / wsum } else { 0.0 };
+                tmp[i + j * nx + k * nx * ny] = sum;
             }
         }
     }
     std::mem::swap(&mut buf, &mut tmp);
 
-    // Pass 3: convolve along Z
+    // Pass 3: Z
     for k in 0..nz {
         for j in 0..ny {
             for i in 0..nx {
                 let mut sum = 0.0f32;
-                let mut wsum = 0.0f32;
                 for ki in 0..ksize {
                     let kk = k as isize + ki as isize - radius;
                     if kk >= 0 && kk < nz as isize {
-                        let src = i + j * nx + kk as usize * nx * ny;
-                        let w = kernel[ki];
-                        sum += buf[src] * w;
-                        wsum += w;
+                        sum += buf[i + j * nx + kk as usize * nx * ny] * kernel[ki];
                     }
                 }
-                tmp[i + j * nx + k * nx * ny] = if wsum > 0.0 { sum / wsum } else { 0.0 };
+                tmp[i + j * nx + k * nx * ny] = sum;
             }
-        }
-    }
-
-    // Apply mask: zero out voxels far from any vertex
-    for i in 0..n_voxels {
-        if !mask[i] {
-            tmp[i] = 0.0;
         }
     }
 

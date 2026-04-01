@@ -1408,3 +1408,169 @@ mod tests {
         assert!(svg.contains("rgb("));
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Stimulus-aligned visualization
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A stimulus segment aligned with a brain activity timestep.
+#[derive(Debug, Clone)]
+pub struct StimulusFrame {
+    /// Timestep index.
+    pub timestep: usize,
+    /// Time in seconds.
+    pub time_sec: f64,
+    /// Words spoken at this timestep.
+    pub words: Vec<String>,
+    /// Path to video frame image (if available).
+    pub video_frame_path: Option<String>,
+}
+
+/// Render a stimulus-aligned HTML page combining brain plots with stimuli.
+///
+/// Produces an HTML file with:
+/// - Top row: video frames (if available)
+/// - Middle row: brain surface plots
+/// - Bottom row: text/word annotations
+///
+/// `brain_svgs`: pre-rendered brain SVG strings per timestep.
+/// `stimuli`: per-timestep stimulus information.
+/// `output_path`: path for the output HTML file.
+pub fn render_timesteps_with_stimuli(
+    brain_svgs: &[String],
+    stimuli: &[StimulusFrame],
+    output_path: &str,
+) -> anyhow::Result<()> {
+    let n = brain_svgs.len().min(stimuli.len());
+    let mut html = String::new();
+
+    html.push_str("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\n");
+    html.push_str("<title>TRIBE v2 — Stimulus-Aligned Brain Activity</title>\n");
+    html.push_str("<style>\n");
+    html.push_str("body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', system-ui, sans-serif; margin: 20px; }\n");
+    html.push_str("h1 { text-align: center; color: #e94560; }\n");
+    html.push_str(".timeline { display: flex; overflow-x: auto; gap: 4px; padding: 10px 0; }\n");
+    html.push_str(".frame { min-width: 200px; text-align: center; }\n");
+    html.push_str(".frame img { width: 200px; height: auto; border-radius: 4px; }\n");
+    html.push_str(".frame .brain { width: 200px; height: 150px; }\n");
+    html.push_str(".frame .brain svg { width: 100%; height: 100%; }\n");
+    html.push_str(".frame .time { font-size: 11px; color: #888; }\n");
+    html.push_str(".frame .words { font-size: 12px; color: #0f3460; background: #e94560; padding: 2px 6px; border-radius: 3px; margin-top: 4px; display: inline-block; }\n");
+    html.push_str(".section-label { font-size: 14px; color: #888; margin: 10px 0 4px 0; }\n");
+    html.push_str("</style></head><body>\n");
+    html.push_str("<h1>✨ TRIBE v2 — Predicted Brain Activity</h1>\n");
+
+    // Video frames row
+    let has_video = stimuli.iter().any(|s| s.video_frame_path.is_some());
+    if has_video {
+        html.push_str("<div class=\"section-label\">🎥 Video</div>\n");
+        html.push_str("<div class=\"timeline\">\n");
+        for i in 0..n {
+            html.push_str("<div class=\"frame\">\n");
+            if let Some(ref path) = stimuli[i].video_frame_path {
+                html.push_str(&format!("<img src=\"{}\" alt=\"frame {}\">\n", path, i));
+            } else {
+                html.push_str("<div style=\"width:200px;height:112px;background:#333;\"></div>\n");
+            }
+            html.push_str("</div>\n");
+        }
+        html.push_str("</div>\n");
+    }
+
+    // Brain plots row
+    html.push_str("<div class=\"section-label\">🧠 Brain Activity</div>\n");
+    html.push_str("<div class=\"timeline\">\n");
+    for i in 0..n {
+        html.push_str("<div class=\"frame\">\n");
+        html.push_str(&format!("<div class=\"brain\">{}</div>\n", brain_svgs[i]));
+        html.push_str(&format!("<div class=\"time\">t={:.1}s</div>\n", stimuli[i].time_sec));
+        html.push_str("</div>\n");
+    }
+    html.push_str("</div>\n");
+
+    // Words row
+    let has_words = stimuli.iter().any(|s| !s.words.is_empty());
+    if has_words {
+        html.push_str("<div class=\"section-label\">💬 Text</div>\n");
+        html.push_str("<div class=\"timeline\">\n");
+        for i in 0..n {
+            html.push_str("<div class=\"frame\">\n");
+            let words_str = stimuli[i].words.join(" ");
+            if !words_str.is_empty() {
+                html.push_str(&format!("<span class=\"words\">{}</span>\n", words_str));
+            }
+            html.push_str("</div>\n");
+        }
+        html.push_str("</div>\n");
+    }
+
+    html.push_str("</body></html>\n");
+
+    std::fs::write(output_path, &html)?;
+    Ok(())
+}
+
+/// Extract video frames at specific timestamps for stimulus display.
+///
+/// Uses ffmpeg to extract frames at the given timestamps.
+/// Returns paths to extracted frame images.
+pub fn extract_stimulus_frames(
+    video_path: &str,
+    timestamps: &[f64],
+    output_dir: &str,
+) -> anyhow::Result<Vec<String>> {
+    std::fs::create_dir_all(output_dir)?;
+    let mut paths = Vec::with_capacity(timestamps.len());
+
+    for (i, &t) in timestamps.iter().enumerate() {
+        let out_path = format!("{}/stimulus_{:05}.png", output_dir, i);
+        let status = std::process::Command::new("ffmpeg")
+            .args(["-y", "-ss", &format!("{:.3}", t)])
+            .args(["-i", video_path])
+            .args(["-frames:v", "1", "-q:v", "3"])
+            .arg(&out_path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        match status {
+            Ok(s) if s.success() => paths.push(out_path),
+            _ => paths.push(String::new()),
+        }
+    }
+
+    Ok(paths)
+}
+
+/// Build StimulusFrame entries from pipeline events.
+pub fn build_stimulus_frames(
+    events: &crate::events::EventList,
+    n_timesteps: usize,
+    duration_secs: f64,
+    video_frame_paths: Option<&[String]>,
+) -> Vec<StimulusFrame> {
+    let tr = if n_timesteps > 0 { duration_secs / n_timesteps as f64 } else { 0.5 };
+
+    (0..n_timesteps).map(|ti| {
+        let t_sec = ti as f64 * tr;
+        let t_end = t_sec + tr;
+
+        // Find words in this time window
+        let words: Vec<String> = events.events.iter()
+            .filter(|e| e.event_type == "Word" && e.start >= t_sec && e.start < t_end)
+            .filter_map(|e| e.text.clone())
+            .collect();
+
+        let video_frame_path = video_frame_paths
+            .and_then(|paths| paths.get(ti))
+            .filter(|p| !p.is_empty())
+            .cloned();
+
+        StimulusFrame {
+            timestep: ti,
+            time_sec: t_sec,
+            words,
+            video_frame_path,
+        }
+    }).collect()
+}

@@ -11,15 +11,17 @@ Pure-Rust inference engine for [TRIBE v2](https://github.com/facebookresearch/tr
 
 ### Recent Additions
 
-- **GPU inference via `--backend burn-gpu`** — 82× faster than pure-Rust CPU using wgpu Metal ([cross-backend parity](#cross-backend-parity): Pearson = 1.0)
-- **NIfTI volume output** (`--nifti`) — surface-to-volume projection, 96³ MNI152 space, .nii.gz
+- **End-to-end media pipeline** (`--video-path`, `--audio-path`, `--text-path`) — raw media → brain predictions in one command
+- **GPU inference via `--backend burn-gpu`** — 84× faster than pure-Rust CPU using wgpu Metal ([3-backend parity](#cross-backend-parity): Pearson = 1.0)
+- **Volume-to-surface projection** (`--fmri-input`) — load raw NIfTI fMRI and project to cortical surface
+- **NIfTI volume output** (`--nifti`) — surface-to-volume projection with 6mm Gaussian smoothing
 - **HCP-MMP1 ROI analysis** (`--roi-summary`, `--roi-output`) — per-region brain activation summaries
 - **Evaluation metrics** (`--ground-truth`) — Pearson correlation, MSE, top-k retrieval vs ground-truth fMRI
 - **Per-modality contribution maps** (`--modality-maps`) — ablation-based text/audio/video contribution
+- **Stimulus-aligned visualization** (`--stimulus-html`) — HTML with video frames + brain activity + text aligned
+- **Text-to-speech** — text input → TTS audio → whisperX → word events → predictions
 - **MP4 video output** (`--mp4`) — animated brain activity over time via ffmpeg
-- **Cross-resolution resampling** (`--output-mesh`) — resample between fsaverage3–6
-- **Subcortical analysis** (`--subcortical`) — Harvard-Oxford atlas structure summaries
-- **8 numeric parity tests** — [verified identical to Python](#numeric-parity) at every pipeline stage
+- **8 numeric parity tests** — [verified identical to Python](#numeric-parity) across all 3 backends
 
 ## Workspace Structure
 
@@ -70,6 +72,10 @@ tribev2-rs/
 - **HCP-MMP1 ROI analysis** — per-region summaries, top-k activated brain regions, wildcard ROI selection
 - **Subcortical structure analysis** — Harvard-Oxford atlas labels for hippocampus, amygdala, thalamus, etc.
 - **Cross-resolution resampling** — kd-tree interpolation between fsaverage3–6 meshes
+- **End-to-end media pipeline** — video/audio/text → automatic feature extraction → predictions
+- **Text-to-speech** — text input → TTS (gtts/macOS say/espeak) → transcription → features
+- **Volume-to-surface projection** — load raw NIfTI fMRI and project to cortical surface (ball/line sampling)
+- **Stimulus-aligned HTML** — video frames + brain activity + word annotations in scrollable timeline
 
 ### Module Map (tribev2 crate)
 
@@ -90,6 +96,8 @@ tribev2-rs/
 | `events.rs` | Events pipeline — whisperX transcription, word timing, audio extraction |
 | `weights.rs` | Safetensors weight loading (bf16/f16/f32, prefix stripping) |
 | `config.rs` | YAML config parsing matching the Python experiment config |
+| `pipeline.rs` | End-to-end media → prediction pipeline (TTS, ffmpeg, whisperX, feature extraction) |
+| `vol_to_surf.rs` | Volume-to-surface projection (NIfTI fMRI → fsaverage, ball/line sampling, trilinear interp) |
 | `tensor.rs` | Pure-Rust tensor ops (matmul, GELU, softmax, RoPE, depthwise conv, etc.) |
 
 ## Architecture
@@ -140,7 +148,35 @@ cargo run --release --bin tribev2-infer -- \
   --plot-dir plots/ --view left --cmap coolwarm --colorbar
 ```
 
-### 3. True per-layer LLaMA features (exact Python parity)
+### 3. End-to-end media pipeline
+
+```bash
+# Video → extract audio → transcribe → extract features → brain predictions
+cargo run --release --bin tribev2-infer -- \
+  --config data/config.yaml --weights data/model.safetensors \
+  --video-path clip.mp4 --llama-model llama-3.2-3b.gguf \
+  --cache-dir ./cache --output predictions.bin \
+  --stimulus-html brain_activity.html
+
+# Audio-only (speech recording)
+cargo run --release --bin tribev2-infer -- \
+  --config data/config.yaml --weights data/model.safetensors \
+  --audio-path speech.wav --llama-model llama-3.2-3b.gguf \
+  --cache-dir ./cache --roi-summary 10
+
+# Text-only (TTS → audio → transcribe → predict)
+cargo run --release --bin tribev2-infer -- \
+  --config data/config.yaml --weights data/model.safetensors \
+  --text-path hamlet.txt --llama-model llama-3.2-3b.gguf \
+  --cache-dir ./cache --plot-dir plots/
+
+# Load raw fMRI NIfTI and project to surface
+cargo run --release --bin tribev2-infer -- \
+  --config data/config.yaml --weights data/model.safetensors \
+  --fmri-input bold.nii.gz --subjects-dir data --vol-to-surf-radius 3.0
+```
+
+### 4. True per-layer LLaMA features (exact Python parity)
 
 The llama-cpp backend extracts final-layer embeddings only. For true per-layer
 hidden states matching the Python pipeline:
@@ -160,7 +196,7 @@ cargo run --release --bin tribev2-infer -- \
   --text-features text_features.bin
 ```
 
-### 4. Library usage
+### 5. Library usage
 
 ```rust
 use std::collections::BTreeMap;
@@ -182,7 +218,7 @@ features.insert("video".into(), Tensor::zeros(&[1, 4224, 100]));
 let output = model.forward(&features, None, true);
 ```
 
-### 5. Burn backend (GPU inference)
+### 6. Burn backend (GPU inference)
 
 ```rust
 use tribev2::config::{ModalityDims, TribeV2Config};
@@ -288,7 +324,29 @@ load_vjepa2_weights(&mut ws, &mut model, &device)?;
 
 ## Benchmarks
 
-Full forward pass: 1152-d, 8-layer transformer, 20,484 outputs, 100 timesteps, 3 modalities.
+Apple M4 Pro, 10 cores, 64 GB RAM. Full forward pass: 1152-d, 8-layer transformer, 20,484 outputs, T=20 input → 100 output timesteps, 3 modalities.
+
+### Forward Pass Only
+
+| Backend | Forward (ms) | Speedup |
+|---------|----------:|--------:|
+| Pure-Rust CPU | 3,028 | 1× |
+| Burn NdArray CPU | 355 | 8.5× |
+| **Burn wgpu Metal GPU** | **36** | **84×** |
+
+### Full Pipeline (forward + all output types)
+
+| Component | CPU | Burn CPU | Burn GPU |
+|---|---:|---:|---:|
+| Weight load | 810 ms | 1,380 ms | 1,115 ms |
+| **Forward pass** | **3,028 ms** | **355 ms** | **773 ms**\* |
+| NIfTI (96³×100, smoothed) | 7,538 ms | 7,533 ms | 7,086 ms |
+| ROI + metrics + corr map | <1 ms | <1 ms | <1 ms |
+| **Total** | **11,455 ms** | **10,908 ms** | **9,246 ms** |
+
+\*GPU forward is 773ms including CPU→GPU data transfer; 36ms warm with data on device.
+
+### Historical Benchmarks (T=100)
 
 | Backend | Mean (ms) | Speedup |
 |---------|----------:|--------:|
@@ -331,12 +389,18 @@ All errors are within f32 accumulation noise through 8 transformer layers — **
 
 ### Cross-Backend Parity
 
-All three Rust backends produce identical results:
+All three Rust backends produce identical results vs Python and vs each other. **0 out of 20,484 vertices** fall below r=0.999 for any backend.
 
-| Comparison | Pearson r | Max abs error | Speedup |
-|------------|-----------|---------------|----------|
-| Burn NdArray vs Pure-Rust | **1.0000000000** | 1.67e-6 | 11.7× |
-| Burn wgpu Metal vs Pure-Rust | **1.0000000000** | 1.82e-6 | **82.3×** |
+| Comparison | Pearson r | Max Abs Error | RMSE |
+|---|---|---|---|
+| Rust CPU vs Python | **1.0000000000** | 1.31e-6 | 1.33e-7 |
+| Burn NdArray vs Python | **1.0000000000** | 1.49e-6 | 1.61e-7 |
+| Burn wgpu Metal vs Python | **1.0000000000** | 1.49e-6 | 1.45e-7 |
+| Burn NdArray vs Rust CPU | **1.0000000000** | 1.67e-6 | 1.81e-7 |
+| Burn wgpu vs Rust CPU | **1.0000000000** | 1.91e-6 | 1.73e-7 |
+| Burn wgpu vs Burn NdArray | **1.0000000000** | 2.26e-6 | 1.84e-7 |
+
+All output types (predictions, ROI summaries, correlation maps, metrics, top-k ranking) are identical across backends.
 
 ```bash
 # Run cross-backend parity tests
@@ -360,6 +424,8 @@ cargo test --release -p tribev2 --test burn_parity \
 | Correlation map | Binary f32 per-vertex r | `--correlation-map corr.bin` |
 | Modality contributions | Binary f32 + SVG per modality | `--modality-maps ./maps` |
 | Resampled predictions | Binary f32 at target resolution | `--output-mesh fsaverage6` |
+| Stimulus visualization | HTML (brain + video + text timeline) | `--stimulus-html out.html` |
+| Surface from NIfTI | Binary f32 via vol-to-surf | `--fmri-input bold.nii.gz` |
 
 ### Backend Selection
 
@@ -370,9 +436,14 @@ cargo run --release --bin tribev2-infer -- --backend cpu ...
 # Burn NdArray CPU (multi-threaded, ~10× faster)
 cargo run --release --bin tribev2-infer -- --backend burn-cpu ...
 
-# Burn wgpu Metal GPU (~80× faster, Apple Silicon)
+# Burn wgpu Metal GPU (~84× faster forward pass, Apple Silicon)
 cargo run --release --bin tribev2-infer --no-default-features \
   --features wgpu-metal,llama-metal -- --backend burn-gpu ...
+
+# End-to-end: video → predictions (auto-extracts audio, transcribes, extracts features)
+cargo run --release --bin tribev2-infer -- \
+  --video-path clip.mp4 --llama-model llama.gguf --cache-dir ./cache \
+  --backend burn-cpu --roi-summary 10 --stimulus-html brain.html ...
 ```
 
 ## Example Outputs
