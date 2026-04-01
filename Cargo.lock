@@ -4673,7 +4673,7 @@ dependencies = [
 
 [[package]]
 name = "tribev2"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "burn",
@@ -4699,7 +4699,7 @@ dependencies = [
 
 [[package]]
 name = "tribev2-audio"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "burn",
@@ -4716,7 +4716,7 @@ dependencies = [
 
 [[package]]
 name = "tribev2-video"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "burn",

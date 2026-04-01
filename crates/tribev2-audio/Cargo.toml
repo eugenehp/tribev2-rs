@@ -1,6 +1,6 @@
 [package]
 name = "tribev2-audio"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2021"
 description = "Wav2Vec-BERT 2.0 audio feature extraction for TRIBE v2 (burn backend)"
 keywords = ["fmri", "audio", "wav2vec", "feature-extraction"]
