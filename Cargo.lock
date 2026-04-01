@@ -4673,7 +4673,7 @@ dependencies = [
 
 [[package]]
 name = "tribev2"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "anyhow",
  "burn",
@@ -4685,6 +4685,7 @@ dependencies = [
  "cc",
  "clap",
  "cubecl",
+ "flate2",
  "half",
  "hf-hub",
  "llama-cpp-4",
@@ -4698,7 +4699,7 @@ dependencies = [
 
 [[package]]
 name = "tribev2-audio"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "anyhow",
  "burn",
@@ -4715,7 +4716,7 @@ dependencies = [
 
 [[package]]
 name = "tribev2-video"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "anyhow",
  "burn",

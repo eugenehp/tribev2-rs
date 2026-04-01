@@ -46,6 +46,12 @@ pub mod segments;
 pub mod plotting;
 pub mod fsaverage;
 pub mod events;
+pub mod nifti;
+pub mod roi;
+pub mod metrics;
+pub mod subcortical;
+pub mod video_output;
+pub mod resample;
 
 // Flat re-exports
 pub use config::{TribeV2Config, EncoderConfig, SubjectLayersConfig, ModalityDims, ModelBuildArgs};
@@ -57,3 +63,9 @@ pub use segments::{Segment, SegmentConfig, SegmentedPrediction, predict_segmente
 pub use plotting::{BrainMesh, PlotConfig, View, ColorMap, render_brain_svg, render_hemisphere_svg, render_multi_view, render_timesteps};
 pub use fsaverage::{load_fsaverage, find_fsaverage_dir, fsaverage_size};
 pub use events::{Event, EventList, build_events_from_media, text_to_events, transcribe_audio};
+pub use nifti::{NiftiConfig, write_nifti, write_nifti_4d, surface_to_volume, load_pial_coords_mni};
+pub use roi::{get_hcp_labels, get_hcp_vertex_labels, summarize_by_roi, get_topk_rois, get_roi_indices};
+pub use metrics::{pearson_r, pearson_per_vertex, mean_pearson, median_pearson, mse, topk_accuracy, load_ground_truth};
+pub use subcortical::{SubcorticalConfig, get_subcortical_labels, get_subcortical_roi_indices, summarize_subcortical};
+pub use video_output::{VideoConfig, render_mp4, render_gif};
+pub use resample::{resample_surface, compute_resampling_map, ResamplingMap};

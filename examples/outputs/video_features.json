@@ -1,0 +1,10 @@
+{
+  "n_layers": 2,
+  "hidden_dim": 1408,
+  "n_timesteps": 20,
+  "shape": [
+    2,
+    1408,
+    20
+  ]
+}

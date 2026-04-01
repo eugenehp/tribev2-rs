@@ -26,10 +26,17 @@ use clap::Parser;
 
 use tribev2::config::{ModalityDims, TribeV2Config};
 use tribev2::features::{self, LlamaFeatureConfig};
+use tribev2::metrics;
 use tribev2::model::tribe::TribeV2;
+use tribev2::model_burn::tribe::TribeV2Burn;
+use tribev2::model_burn::weights::{BurnWeightStore, load_burn_weights};
+use tribev2::nifti::{self, NiftiConfig};
 use tribev2::plotting;
+use tribev2::roi;
 use tribev2::segments::{self, SegmentConfig};
+use tribev2::subcortical;
 use tribev2::tensor::Tensor;
+use tribev2::video_output::{self, VideoConfig};
 use tribev2::weights::{WeightMap, load_weights};
 
 #[derive(Parser, Debug)]
@@ -133,6 +140,70 @@ struct Args {
     #[arg(long, default_value = "fsaverage5")]
     mesh: String,
 
+    /// Output NIfTI file (.nii or .nii.gz) — projects surface predictions to volume
+    #[arg(long)]
+    nifti: Option<String>,
+
+    /// NIfTI volume dimensions (isotropic). Default: 96
+    #[arg(long, default_value = "96")]
+    nifti_dim: usize,
+
+    /// NIfTI voxel size in mm. Default: 2.0
+    #[arg(long, default_value = "2.0")]
+    nifti_voxel_size: f32,
+
+    /// Print top-k ROI summary (HCP-MMP1 parcellation)
+    #[arg(long)]
+    roi_summary: Option<usize>,
+
+    /// Save per-ROI averages as JSON
+    #[arg(long)]
+    roi_output: Option<String>,
+
+    /// Path to HCP annotation directory (for exact ROI labels)
+    #[arg(long)]
+    hcp_annot_dir: Option<String>,
+
+    /// Save segment metadata as JSON
+    #[arg(long)]
+    segments_output: Option<String>,
+
+    /// Ground-truth fMRI data (binary f32) for evaluation
+    #[arg(long)]
+    ground_truth: Option<String>,
+
+    /// Top-k for retrieval accuracy metric
+    #[arg(long, default_value = "1")]
+    topk: usize,
+
+    /// Save per-vertex correlation map (binary f32)
+    #[arg(long)]
+    correlation_map: Option<String>,
+
+    /// Show subcortical structure activations (requires subcortical model)
+    #[arg(long)]
+    subcortical: bool,
+
+    /// Output MP4 video of brain activity over time
+    #[arg(long)]
+    mp4: Option<String>,
+
+    /// Video FPS (default: 2)
+    #[arg(long, default_value = "2")]
+    video_fps: u32,
+
+    /// Compute per-modality contribution maps via ablation
+    #[arg(long)]
+    modality_maps: Option<String>,
+
+    /// Resample output to a different fsaverage resolution
+    #[arg(long)]
+    output_mesh: Option<String>,
+
+    /// Backend: "cpu" (pure-Rust), "burn-cpu" (Burn NdArray), "burn-gpu" (Burn wgpu Metal/Vulkan)
+    #[arg(long, default_value = "cpu")]
+    backend: String,
+
     /// Print verbose info
     #[arg(long, short = 'v')]
     verbose: bool,
@@ -201,6 +272,119 @@ fn load_preextracted_features(
     Ok(Tensor::from_vec(data, vec![1, n_l * dim, n_t]))
 }
 
+/// Run forward pass using the Burn backend.
+///
+/// Builds a `TribeV2Burn<B>`, loads weights, converts features from the pure-Rust
+/// `Tensor` format to burn tensors, runs the forward pass, and converts back.
+fn run_burn_forward(
+    backend_name: &str,
+    weights_path: &str,
+    feature_dims: &[ModalityDims],
+    n_outputs: usize,
+    n_output_timesteps: usize,
+    brain_config: &tribev2::config::BrainModelConfig,
+    features: &BTreeMap<String, Tensor>,
+) -> Result<(Vec<Vec<f32>>, usize)> {
+    match backend_name {
+        #[cfg(feature = "wgpu")]
+        "burn-gpu" => run_burn_forward_impl::<burn::backend::Wgpu>(
+            burn::backend::wgpu::WgpuDevice::DefaultDevice,
+            weights_path, feature_dims, n_outputs, n_output_timesteps,
+            brain_config, features,
+        ),
+        #[cfg(not(feature = "wgpu"))]
+        "burn-gpu" => anyhow::bail!(
+            "burn-gpu backend requires the 'wgpu' feature.\n\
+             Rebuild with: cargo run --release --features wgpu-metal -- ..."
+        ),
+        "burn-cpu" | _ if backend_name.starts_with("burn") => {
+            #[cfg(feature = "ndarray")]
+            {
+                run_burn_forward_impl::<burn::backend::NdArray>(
+                    Default::default(),
+                    weights_path, feature_dims, n_outputs, n_output_timesteps,
+                    brain_config, features,
+                )
+            }
+            #[cfg(not(feature = "ndarray"))]
+            {
+                anyhow::bail!(
+                    "burn-cpu backend requires the 'ndarray' feature.\n\
+                     Rebuild with: cargo run --release --features ndarray -- ..."
+                )
+            }
+        }
+        _ => anyhow::bail!("Unknown backend: {}", backend_name),
+    }
+}
+
+fn run_burn_forward_impl<B: burn::prelude::Backend>(
+    device: B::Device,
+    weights_path: &str,
+    feature_dims: &[ModalityDims],
+    n_outputs: usize,
+    n_output_timesteps: usize,
+    brain_config: &tribev2::config::BrainModelConfig,
+    features: &BTreeMap<String, Tensor>,
+) -> Result<(Vec<Vec<f32>>, usize)> {
+    use burn::prelude::*;
+
+    eprintln!("  Building Burn model...");
+    let tb = Instant::now();
+    let mut burn_model = TribeV2Burn::<B>::new(
+        feature_dims, n_outputs, n_output_timesteps, brain_config, &device,
+    );
+    eprintln!("  Burn model built ({:.0} ms)", tb.elapsed().as_secs_f64() * 1000.0);
+
+    eprintln!("  Loading Burn weights...");
+    let tw = Instant::now();
+    let mut ws = BurnWeightStore::from_safetensors(weights_path)
+        .with_context(|| "failed to load burn weights")?;
+    load_burn_weights(&mut ws, &mut burn_model, &device)
+        .with_context(|| "failed to load burn weights into model")?;
+    eprintln!("  Burn weights loaded ({:.0} ms)", tw.elapsed().as_secs_f64() * 1000.0);
+
+    // Convert pure-Rust Tensors → Burn tensors
+    let mut burn_features: Vec<(&str, burn::tensor::Tensor<B, 3>)> = Vec::new();
+    for (name, tensor) in features {
+        let shape = &tensor.shape;
+        let burn_tensor = burn::tensor::Tensor::<B, 3>::from_data(
+            TensorData::new(tensor.data.clone(), [shape[0], shape[1], shape[2]]),
+            &device,
+        );
+        // Leak the name string so we can get a &str with appropriate lifetime
+        // (the Vec lives for the duration of forward())
+        burn_features.push((string_to_static_str(name.clone()), burn_tensor));
+    }
+
+    eprintln!("  Running Burn forward pass...");
+    let tf = Instant::now();
+    let output = burn_model.forward(burn_features);
+    let [b, d, t] = output.dims();
+    eprintln!("  Burn forward: [{}, {}, {}] ({:.0} ms)",
+        b, d, t, tf.elapsed().as_secs_f64() * 1000.0);
+
+    // Convert back to Vec<Vec<f32>>
+    let output_data: Vec<f32> = output.into_data().to_vec().unwrap();
+    // output_data layout: [B, D, T] row-major
+    let n_out = d;
+    let n_t = t;
+    let predictions: Vec<Vec<f32>> = (0..n_t)
+        .map(|ti| {
+            (0..n_out)
+                .map(|di| output_data[di * n_t + ti])
+                .collect()
+        })
+        .collect();
+
+    Ok((predictions, n_t))
+}
+
+/// Helper: convert String to &'static str (leaked, but fine for CLI lifetime).
+fn string_to_static_str(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
+}
+
 fn parse_cmap(s: &str) -> plotting::ColorMap {
     match s {
         "hot" => plotting::ColorMap::Hot,
@@ -234,9 +418,12 @@ fn main() -> Result<()> {
         .with_context(|| "failed to parse config.yaml")?;
 
     // Set average_subjects for inference when no specific subject is requested
+    // Mirrors Python from_pretrained: n_subjects=0, average_subjects=true
+    // The saved checkpoint has averaged weights → 1 subject row (the dropout row)
     if args.subject.is_none() {
         if let Some(ref mut sl) = config.brain_model_config.subject_layers {
             sl.average_subjects = true;
+            sl.n_subjects = 0;
         }
     }
 
@@ -263,6 +450,7 @@ fn main() -> Result<()> {
         20484
     };
     let n_output_timesteps = config.data.duration_trs;
+    let use_burn = args.backend.starts_with("burn");
 
     let mut model = TribeV2::new(
         feature_dims.clone(),
@@ -294,7 +482,7 @@ fn main() -> Result<()> {
         eprintln!("Unused weight keys: {:?}", remaining);
     }
 
-    eprintln!("Weights loaded ({:.0} ms)", t1.elapsed().as_secs_f64() * 1000.0);
+    eprintln!("Weights loaded ({:.0} ms), backend={}", t1.elapsed().as_secs_f64() * 1000.0, args.backend);
 
     // ── Extract / load features ───────────────────────────────────────
     let n_timesteps = args.n_timesteps;
@@ -378,7 +566,7 @@ fn main() -> Result<()> {
     eprintln!("Active modalities: {} / {}", n_modalities, features.len());
 
     // ── Run inference ─────────────────────────────────────────────────
-    eprintln!("Running inference...");
+    eprintln!("Running inference (backend={})...", args.backend);
     let t3 = Instant::now();
 
     let predictions: Vec<Vec<f32>>;
@@ -387,7 +575,7 @@ fn main() -> Result<()> {
     let subject_ids: Option<Vec<usize>> = args.subject.map(|s| vec![s]);
 
     if args.segment {
-        // Segment-based inference
+        // Segment-based inference (always uses pure-Rust backend)
         let seg_config = SegmentConfig {
             duration_trs: args.segment_duration,
             overlap_trs: args.segment_overlap,
@@ -397,7 +585,6 @@ fn main() -> Result<()> {
             stride_drop_incomplete: false,
         };
 
-        // TODO: per-subject segmented inference (currently averages subjects)
         let _ = &subject_ids;
         let result = segments::predict_segmented(&model, &features, &seg_config);
         eprintln!(
@@ -408,8 +595,21 @@ fn main() -> Result<()> {
         );
         predictions = result.predictions;
         n_pred_timesteps = predictions.len();
+    } else if use_burn {
+        // ── Burn backend forward pass ──────────────────────────────────
+        let (preds, n_t) = run_burn_forward(
+            &args.backend,
+            &args.weights,
+            &feature_dims,
+            n_outputs,
+            n_output_timesteps,
+            &config.brain_model_config,
+            &features,
+        )?;
+        predictions = preds;
+        n_pred_timesteps = n_t;
     } else {
-        // Single forward pass
+        // ── Pure-Rust forward pass ────────────────────────────────────
         let output = model.forward(&features, subject_ids.as_deref(), true);
         // output: [1, n_outputs, n_output_timesteps]
         let n_out = output.shape[1];
@@ -510,6 +710,266 @@ fn main() -> Result<()> {
                 "overview_t0",
             )?;
             eprintln!("Multi-view overview: {:?}", multi_paths);
+        }
+    }
+
+    // ── Generate NIfTI output ─────────────────────────────────────────
+    if let Some(ref nifti_path) = args.nifti {
+        eprintln!("Generating NIfTI volume output...");
+        let t5 = Instant::now();
+
+        let nifti_config = NiftiConfig {
+            dims: (args.nifti_dim, args.nifti_dim, args.nifti_dim),
+            voxel_size: args.nifti_voxel_size,
+            compress: nifti_path.ends_with(".gz"),
+            ..Default::default()
+        };
+
+        // Load original pial coordinates in MNI space
+        let vertex_coords = nifti::load_pial_coords_mni(
+            &args.mesh,
+            args.subjects_dir.as_deref(),
+        ).unwrap_or_else(|e| {
+            eprintln!("Warning: could not load pial coords ({}), using visualization mesh coords", e);
+            match tribev2::fsaverage::load_fsaverage(
+                &args.mesh, "pial", "sulcal", args.subjects_dir.as_deref(),
+            ) {
+                Ok(b) => nifti::get_mesh_coords(&b),
+                Err(_) => {
+                    eprintln!("Error: no mesh available for NIfTI projection");
+                    Vec::new()
+                }
+            }
+        });
+
+        if vertex_coords.is_empty() {
+            eprintln!("Skipping NIfTI output: no vertex coordinates available");
+        } else {
+            let path = std::path::Path::new(nifti_path);
+            if predictions.len() == 1 {
+                // Single timestep → 3D NIfTI
+                let vol = nifti::surface_to_volume(&predictions[0], &vertex_coords, &nifti_config);
+                nifti::write_nifti(path, &vol, &nifti_config)?;
+            } else {
+                // Multiple timesteps → 4D NIfTI
+                nifti::write_nifti_4d(path, &predictions, &vertex_coords, &nifti_config)?;
+            }
+            eprintln!(
+                "NIfTI saved to {} ({}×{}×{}, {} timesteps, {:.0} ms)",
+                nifti_path, args.nifti_dim, args.nifti_dim, args.nifti_dim,
+                predictions.len(),
+                t5.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+    }
+
+    // ── ROI summary ───────────────────────────────────────────────────
+    if args.roi_summary.is_some() || args.roi_output.is_some() {
+        let annot_dir = args.hcp_annot_dir.as_ref().map(|s| std::path::Path::new(s.as_str()));
+
+        // Average predictions across timesteps for ROI analysis
+        let n_vertices = predictions.first().map_or(0, |v| v.len());
+        let mut avg_pred = vec![0.0f32; n_vertices];
+        for row in &predictions {
+            for (i, &v) in row.iter().enumerate() {
+                avg_pred[i] += v;
+            }
+        }
+        if !predictions.is_empty() {
+            let scale = 1.0 / predictions.len() as f32;
+            for v in &mut avg_pred {
+                *v *= scale;
+            }
+        }
+
+        if let Some(k) = args.roi_summary {
+            let topk = roi::get_topk_rois(&avg_pred, k, annot_dir);
+            eprintln!("\n{}", roi::topk_to_table(&topk));
+        }
+
+        if let Some(ref path) = args.roi_output {
+            let summary = roi::summarize_by_roi(&avg_pred, annot_dir);
+            let json = roi::roi_summary_to_json(&summary);
+            std::fs::write(path, &json)?;
+            eprintln!("ROI summary saved to {}", path);
+        }
+    }
+
+    // ── Segment metadata output ───────────────────────────────────────
+    if let Some(ref seg_path) = args.segments_output {
+        // Build segment metadata from predictions
+        let seg_entries: Vec<serde_json::Value> = predictions.iter().enumerate()
+            .map(|(i, _)| {
+                serde_json::json!({
+                    "timestep_index": i,
+                    "start": i as f64 * 0.5,
+                    "duration": 0.5,
+                })
+            })
+            .collect();
+        let json = serde_json::to_string_pretty(&seg_entries)?;
+        std::fs::write(seg_path, &json)?;
+        eprintln!("Segment metadata saved to {} ({} segments)", seg_path, seg_entries.len());
+    }
+
+    // ── Evaluation metrics ────────────────────────────────────────────
+    if let Some(ref gt_path) = args.ground_truth {
+        eprintln!("\nEvaluating against ground truth...");
+        let n_vertices = predictions.first().map_or(0, |v| v.len());
+        let truth = metrics::load_ground_truth(gt_path, n_vertices)?;
+
+        let n_eval = predictions.len().min(truth.len());
+        let pred_slice = &predictions[..n_eval];
+        let truth_slice = &truth[..n_eval];
+
+        let mean_r = metrics::mean_pearson(pred_slice, truth_slice);
+        let median_r = metrics::median_pearson(pred_slice, truth_slice);
+        let mse_val = metrics::mse(pred_slice, truth_slice);
+        let topk_acc = metrics::topk_accuracy(pred_slice, truth_slice, args.topk);
+
+        let report = metrics::format_metrics_report(
+            mean_r, median_r, mse_val,
+            Some((args.topk, topk_acc)),
+            n_eval, n_vertices,
+        );
+        eprintln!("\n{}", report);
+
+        // Optionally save correlation map
+        if let Some(ref corr_path) = args.correlation_map {
+            let corr = metrics::pearson_per_vertex(pred_slice, truth_slice);
+            let bytes: Vec<u8> = corr.iter().flat_map(|f| f.to_le_bytes()).collect();
+            std::fs::write(corr_path, &bytes)?;
+            eprintln!("Correlation map saved to {} ({} vertices)", corr_path, corr.len());
+        }
+    }
+
+    // ── Subcortical summary ───────────────────────────────────────────
+    if args.subcortical {
+        eprintln!("\nSubcortical structure analysis:");
+        let n_vertices = predictions.first().map_or(0, |v| v.len());
+        let mut avg_pred = vec![0.0f32; n_vertices];
+        for row in &predictions {
+            for (i, &v) in row.iter().enumerate() {
+                avg_pred[i] += v;
+            }
+        }
+        if !predictions.is_empty() {
+            let scale = 1.0 / predictions.len() as f32;
+            for v in &mut avg_pred { *v *= scale; }
+        }
+
+        let config = subcortical::SubcorticalConfig::default();
+        let summary = subcortical::summarize_subcortical(&avg_pred, &config);
+        eprintln!("\n{}", subcortical::format_subcortical_table(&summary));
+        eprintln!("\nNote: Subcortical analysis requires a model trained with MaskProjector.");
+        eprintln!("The cortical model\'s vertex indices do not directly map to subcortical voxels.");
+    }
+
+    // ── MP4 video output ──────────────────────────────────────────────
+    if let Some(ref mp4_path) = args.mp4 {
+        eprintln!("Generating MP4 video...");
+
+        let view = plotting::View::from_str(&args.view)
+            .unwrap_or(plotting::View::Left);
+
+        let brain = match tribev2::fsaverage::load_fsaverage(
+            &args.mesh, "half", "sulcal", args.subjects_dir.as_deref(),
+        ) {
+            Ok(b) => b,
+            Err(_) => plotting::generate_test_mesh(5000),
+        };
+
+        let plot_config = plotting::PlotConfig {
+            width: 800,
+            height: 600,
+            cmap: parse_cmap(&args.cmap),
+            view,
+            colorbar: args.colorbar,
+            symmetric_cbar: false,
+            ..Default::default()
+        };
+
+        let video_config = VideoConfig {
+            fps: args.video_fps,
+            ..Default::default()
+        };
+
+        video_output::render_mp4(
+            &predictions,
+            &brain,
+            &plot_config,
+            &video_config,
+            std::path::Path::new(mp4_path),
+        )?;
+    }
+
+    // ── Per-modality contribution maps ────────────────────────────────
+    if let Some(ref maps_dir) = args.modality_maps {
+        eprintln!("Computing per-modality contribution maps...");
+        std::fs::create_dir_all(maps_dir)?;
+
+        let contributions = model.modality_ablation(
+            &features,
+            subject_ids.as_deref(),
+        );
+
+        for (modality, contrib) in &contributions {
+            // Save as binary f32
+            let bin_path = format!("{}/{}_contribution.bin", maps_dir, modality);
+            let bytes: Vec<u8> = contrib.iter().flat_map(|f| f.to_le_bytes()).collect();
+            std::fs::write(&bin_path, &bytes)?;
+
+            // Summary stats
+            let max_val = contrib.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let mean_val: f32 = contrib.iter().sum::<f32>() / contrib.len() as f32;
+            eprintln!("  {}: mean={:.6}, max={:.6} → {}",
+                modality, mean_val, max_val, bin_path);
+        }
+
+        // Also save as SVG if we can load a brain mesh
+        if let Ok(brain) = tribev2::fsaverage::load_fsaverage(
+            &args.mesh, "half", "sulcal", args.subjects_dir.as_deref(),
+        ) {
+            let view = plotting::View::from_str(&args.view)
+                .unwrap_or(plotting::View::Left);
+            for (modality, contrib) in &contributions {
+                let plot_config = plotting::PlotConfig {
+                    width: 800,
+                    height: 600,
+                    cmap: plotting::ColorMap::Hot,
+                    view,
+                    colorbar: true,
+                    title: Some(format!("{} contribution", modality)),
+                    ..Default::default()
+                };
+                let svg = plotting::render_brain_svg(contrib, &brain, &plot_config);
+                let svg_path = format!("{}/{}_contribution.svg", maps_dir, modality);
+                std::fs::write(&svg_path, &svg)?;
+                eprintln!("  SVG: {}", svg_path);
+            }
+        }
+    }
+
+    // ── Resample output ───────────────────────────────────────────────
+    if let Some(ref target_mesh) = args.output_mesh {
+        eprintln!("Resampling predictions from {} to {}...", args.mesh, target_mesh);
+        let target_size = tribev2::fsaverage::fsaverage_size(target_mesh)
+            .ok_or_else(|| anyhow::anyhow!("Unknown target mesh: {}", target_mesh))?;
+
+        match tribev2::resample::resample_surface(
+            &predictions[0], &args.mesh, target_mesh,
+            args.subjects_dir.as_deref(), 5,
+        ) {
+            Ok(resampled) => {
+                let out_path = format!("predictions_{}.bin", target_mesh);
+                let bytes: Vec<u8> = resampled.iter().flat_map(|f| f.to_le_bytes()).collect();
+                std::fs::write(&out_path, &bytes)?;
+                eprintln!("Resampled predictions saved to {} ({} vertices)",
+                    out_path, 2 * target_size);
+            }
+            Err(e) => {
+                eprintln!("Resampling failed: {}. Requires FreeSurfer mesh data.", e);
+            }
         }
     }
 

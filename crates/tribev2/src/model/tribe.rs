@@ -521,4 +521,67 @@ impl TribeV2 {
         }
         Ok(result)
     }
+
+    /// Compute per-modality contribution maps via ablation.
+    ///
+    /// For each modality, runs inference with that modality zeroed out,
+    /// then computes the difference from the full prediction. The difference
+    /// indicates how much each modality contributes to the prediction at
+    /// each vertex.
+    ///
+    /// `features`: map from modality name → tensor [1, L*D, T].
+    /// `subject_ids`: optional subject indices.
+    ///
+    /// Returns: HashMap<modality_name, Vec<f32>> where each Vec is the
+    /// per-vertex contribution (averaged across timesteps).
+    pub fn modality_ablation(
+        &self,
+        features: &BTreeMap<String, Tensor>,
+        subject_ids: Option<&[usize]>,
+    ) -> BTreeMap<String, Vec<f32>> {
+        // Full prediction
+        let full_output = self.forward(features, subject_ids, true);
+        // full_output: [1, n_outputs, n_output_timesteps]
+        let n_out = full_output.shape[1];
+        let n_t = full_output.shape[2];
+
+        // Average across timesteps for full prediction
+        let full_avg: Vec<f32> = (0..n_out)
+            .map(|di| {
+                let base = di * n_t;
+                full_output.data[base..base + n_t].iter().sum::<f32>() / n_t as f32
+            })
+            .collect();
+
+        let mut contributions = BTreeMap::new();
+
+        // For each modality, zero it out and measure the difference
+        for md in &self.feature_dims {
+            if !features.contains_key(&md.name) {
+                continue;
+            }
+
+            // Create features with this modality zeroed
+            let mut ablated_features = features.clone();
+            if let Some(tensor) = ablated_features.get(&md.name) {
+                let zeros = Tensor::zeros(&tensor.shape);
+                ablated_features.insert(md.name.clone(), zeros);
+            }
+
+            let ablated_output = self.forward(&ablated_features, subject_ids, true);
+
+            // Contribution = |full - ablated| averaged across timesteps
+            let contribution: Vec<f32> = (0..n_out)
+                .map(|di| {
+                    let base = di * n_t;
+                    let ablated_avg: f32 = ablated_output.data[base..base + n_t].iter().sum::<f32>() / n_t as f32;
+                    (full_avg[di] - ablated_avg).abs()
+                })
+                .collect();
+
+            contributions.insert(md.name.clone(), contribution);
+        }
+
+        contributions
+    }
 }
