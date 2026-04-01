@@ -416,6 +416,24 @@ Ablation-based contribution: for each modality, the difference in prediction whe
 
 Video contributes most strongly to occipital (visual) cortex, text to temporal/frontal language areas.
 
+### NIfTI Volume Output
+
+Surface predictions projected into MNI152 volumetric space (96×96×96 voxels, 2mm isotropic):
+
+![NIfTI slices](examples/outputs/nifti_slices.png)
+
+*Top row: axial, coronal, sagittal slices through the center of activity. Bottom row: axial slices at different z-levels. Coolwarm colormap shows predicted BOLD response (red = positive, blue = negative). The sparse pattern reflects the cortical surface vertices projected into volume space.*
+
+```bash
+# Generate NIfTI output
+cargo run --release --bin tribev2-infer -- \
+  --config data/config.yaml --weights data/model.safetensors \
+  --text-features text.bin --nifti predictions.nii.gz --nifti-dim 96
+
+# View with any NIfTI viewer (FSLeyes, freeview, nibabel, etc.)
+fsleyes predictions.nii.gz
+```
+
 ### Top-20 Activated Brain Regions (HCP-MMP1)
 
 ```
@@ -462,6 +480,7 @@ Evaluation Metrics
 examples/outputs/
 ├── roi_summary.json                  Per-ROI average activation (173 regions)
 ├── segments.json                     Segment metadata (100 timesteps)
+├── nifti_slices.png                  NIfTI volume slice visualization
 ├── plots_selected/
 │   ├── frame_0000.png – frame_0099.png  Per-timestep brain plots
 │   └── overview_t0_{left,right,dorsal}.png  Multi-view overview
