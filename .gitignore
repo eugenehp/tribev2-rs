@@ -6,6 +6,7 @@ data/
 *.bin
 *.png
 !figures/*.png
+!examples/outputs/**/*.png
 *.npy
 *.pyc
 __pycache__/
