@@ -81,7 +81,7 @@ burn-wgpu    = { version = "0.20.1", default-features = true, optional = true }
 cubecl       = { version = "0.9", features = ["wgpu"], optional = true }
 burn-cubecl  = { version = "0.20.1", optional = true }
 burn-backend = { version = "0.20.1", optional = true }
-llama-cpp-4      = { version = "0.2.19", default-features = false }
+llama-cpp-4  = { version = "0.3.0", default-features = false }
 safetensors  = "0.7"
 half         = { version = "2", features = ["bytemuck"] }
 serde        = { version = "1", features = ["derive"] }
