@@ -1,0 +1,1 @@
+{"burn_wgpu_metal":{"engine":"burn","device":"burn/wgpu-metal","mean_ms":13.6,"min_ms":12.6,"max_ms":14.5,"std_ms":0.9,"n_runs":2,"timesteps":10,"output_shape":[1,20484,100]}}

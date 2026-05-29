@@ -1,0 +1,1 @@
+{"rlx_wgpu":{"engine":"rlx","device":"wgpu","mean_ms":75.8,"min_ms":75.7,"max_ms":76.0,"std_ms":0.2,"n_runs":2,"timesteps":10,"output_shape":[1,20484,100]}}

@@ -28,7 +28,9 @@ use tribev2::config::{ModalityDims, TribeV2Config};
 use tribev2::features::{self, LlamaFeatureConfig};
 use tribev2::metrics;
 use tribev2::model::tribe::TribeV2;
+#[cfg(feature = "burn")]
 use tribev2::model_burn::tribe::TribeV2Burn;
+#[cfg(feature = "burn")]
 use tribev2::model_burn::weights::{BurnWeightStore, load_burn_weights};
 use tribev2::nifti::{self, NiftiConfig};
 use tribev2::plotting;
@@ -37,6 +39,7 @@ use tribev2::segments::{self, SegmentConfig};
 use tribev2::subcortical;
 use tribev2::tensor::Tensor;
 use tribev2::video_output::{self, VideoConfig};
+use tribev2::brain_encoder::{load_encoder, parse_backend, BrainEncoder, LoadedEncoder};
 use tribev2::weights::{WeightMap, load_weights};
 
 #[derive(Parser, Debug)]
@@ -232,8 +235,10 @@ struct Args {
     #[arg(long, default_value = "3.0")]
     vol_to_surf_radius: f32,
 
-    /// Backend: "cpu" (pure-Rust), "burn-cpu" (Burn NdArray), "burn-gpu" (Burn wgpu Metal/Vulkan)
-    #[arg(long, default_value = "cpu")]
+    /// Inference engine / device:
+    /// `rlx` / `rlx-metal` / … (default), `rust` / `cpu`, `burn` / `burn-gpu`,
+    /// or shorthand `metal`, `mps`, `mlx`, `cuda`, `rocm`, `wgpu` for RLX.
+    #[arg(long, default_value = "rlx")]
     backend: String,
 
     /// Print verbose info
@@ -308,6 +313,7 @@ fn load_preextracted_features(
 ///
 /// Builds a `TribeV2Burn<B>`, loads weights, converts features from the pure-Rust
 /// `Tensor` format to burn tensors, runs the forward pass, and converts back.
+#[cfg(feature = "burn")]
 fn run_burn_forward(
     backend_name: &str,
     weights_path: &str,
@@ -329,27 +335,52 @@ fn run_burn_forward(
             "burn-gpu backend requires the 'wgpu' feature.\n\
              Rebuild with: cargo run --release --features wgpu-metal -- ..."
         ),
-        "burn-cpu" | _ if backend_name.starts_with("burn") => {
-            #[cfg(feature = "ndarray")]
+        "burn-cpu" | "burn" | _ if backend_name.starts_with("burn") => {
+            #[cfg(not(feature = "wgpu"))]
             {
                 run_burn_forward_impl::<burn::backend::NdArray>(
                     Default::default(),
-                    weights_path, feature_dims, n_outputs, n_output_timesteps,
-                    brain_config, features,
+                    weights_path,
+                    feature_dims,
+                    n_outputs,
+                    n_output_timesteps,
+                    brain_config,
+                    features,
                 )
             }
-            #[cfg(not(feature = "ndarray"))]
+            #[cfg(feature = "wgpu")]
             {
-                anyhow::bail!(
-                    "burn-cpu backend requires the 'ndarray' feature.\n\
-                     Rebuild with: cargo run --release --features ndarray -- ..."
+                run_burn_forward_impl::<burn::backend::NdArray>(
+                    Default::default(),
+                    weights_path,
+                    feature_dims,
+                    n_outputs,
+                    n_output_timesteps,
+                    brain_config,
+                    features,
                 )
             }
         }
-        _ => anyhow::bail!("Unknown backend: {}", backend_name),
+        _ => anyhow::bail!("Unknown burn backend: {}", backend_name),
     }
 }
 
+#[cfg(not(feature = "burn"))]
+fn run_burn_forward(
+    _backend_name: &str,
+    _weights_path: &str,
+    _feature_dims: &[ModalityDims],
+    _n_outputs: usize,
+    _n_output_timesteps: usize,
+    _brain_config: &tribev2::config::BrainModelConfig,
+    _features: &BTreeMap<String, Tensor>,
+) -> Result<(Vec<Vec<f32>>, usize)> {
+    anyhow::bail!(
+        "Burn backend is not enabled. Rebuild with `--features burn` (and `wgpu-metal` for GPU)."
+    )
+}
+
+#[cfg(feature = "burn")]
 fn run_burn_forward_impl<B: burn::prelude::Backend>(
     device: B::Device,
     weights_path: &str,
@@ -413,6 +444,7 @@ fn run_burn_forward_impl<B: burn::prelude::Backend>(
 }
 
 /// Helper: convert String to &'static str (leaked, but fine for CLI lifetime).
+#[cfg(feature = "burn")]
 fn string_to_static_str(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
@@ -482,39 +514,45 @@ fn main() -> Result<()> {
         20484
     };
     let n_output_timesteps = config.data.duration_trs;
-    let use_burn = args.backend.starts_with("burn");
+    let use_burn = tribev2::brain_encoder::use_burn_backend(&args.backend);
+    let (enc_kind, rlx_dev) = parse_backend(&args.backend);
 
-    let mut model = TribeV2::new(
-        feature_dims.clone(),
-        n_outputs,
-        n_output_timesteps,
-        &config.brain_model_config,
-    );
+    let mut encoder = if use_burn {
+        None
+    } else {
+        let t1 = Instant::now();
+        let enc = load_encoder(
+            enc_kind,
+            &args.config,
+            &args.weights,
+            args.build_args.as_deref(),
+            rlx_dev.as_ref().map(|s| &s[..]),
+        )?;
+        eprintln!(
+            "Encoder loaded ({:.0} ms), backend={} ({})",
+            t1.elapsed().as_secs_f64() * 1000.0,
+            args.backend,
+            enc.kind().label()
+        );
+        Some(enc)
+    };
 
-    eprintln!("Model built ({:.0} ms)", t0.elapsed().as_secs_f64() * 1000.0);
+    // Pure-Rust reference model for modality metadata when using Burn only
+    let rust_ref = if use_burn {
+        let mut m = TribeV2::new(
+            feature_dims.clone(),
+            n_outputs,
+            n_output_timesteps,
+            &config.brain_model_config,
+        );
+        let mut wm = WeightMap::from_safetensors(&args.weights)?;
+        load_weights(&mut wm, &mut m)?;
+        Some(m)
+    } else {
+        None
+    };
 
-    // ── Load weights ──────────────────────────────────────────────────
-    let t1 = Instant::now();
-    let mut wm = WeightMap::from_safetensors(&args.weights)
-        .with_context(|| format!("failed to load weights: {}", args.weights))?;
-
-    if args.verbose {
-        let keys = wm.remaining_keys();
-        eprintln!("Weight keys ({}):", keys.len());
-        for k in &keys {
-            eprintln!("  {}", k);
-        }
-    }
-
-    load_weights(&mut wm, &mut model)
-        .with_context(|| "failed to load weights into model")?;
-
-    let remaining = wm.remaining_keys();
-    if !remaining.is_empty() && args.verbose {
-        eprintln!("Unused weight keys: {:?}", remaining);
-    }
-
-    eprintln!("Weights loaded ({:.0} ms), backend={}", t1.elapsed().as_secs_f64() * 1000.0, args.backend);
+    eprintln!("Ready ({:.0} ms)", t0.elapsed().as_secs_f64() * 1000.0);
 
     // ── End-to-end pipeline (--video-path / --audio-path / --text-path) ───
     let has_media_input = args.video_path.is_some() || args.audio_path.is_some() || args.text_path.is_some();
@@ -541,7 +579,10 @@ fn main() -> Result<()> {
             segment_duration: args.segment_duration,
             verbose: args.verbose,
         };
-        let result = tribev2::pipeline::predict_from_media(&model, &pipe_input, &pipe_config)?;
+        let enc = encoder
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("pipeline requires a loaded encoder (not burn-only)"))?;
+        let result = tribev2::pipeline::predict_from_media(enc, &pipe_input, &pipe_config)?;
         pipeline_duration = result.duration_secs;
         pipeline_events = Some(result.events.clone());
         pipeline_output = Some(result);
@@ -587,9 +628,9 @@ fn main() -> Result<()> {
         let llama_config = LlamaFeatureConfig {
             model_path: llama_path.clone(),
             layer_positions: layer_positions.clone(),
-            n_layers: 28, // LLaMA-3.2-3B
-            n_ctx: 2048,
+            n_layers: Some(28), // LLaMA-3.2-3B
             frequency: 2.0,
+            ..LlamaFeatureConfig::default()
         };
         let text_feats = features::extract_llama_features(&llama_config, prompt, args.verbose)?;
 
@@ -640,8 +681,13 @@ fn main() -> Result<()> {
         features.insert("video".to_string(), t);
     }
 
-    // Fill missing modalities with zeros using build_args dims (or pretrained defaults)
-    for md in &feature_dims {
+    let feat_dims: &[ModalityDims] = encoder
+        .as_ref()
+        .map(|e| e.feature_dims())
+        .or(rust_ref.as_ref().map(|m| m.feature_dims.as_slice()))
+        .unwrap_or(&feature_dims);
+
+    for md in feat_dims {
         if !features.contains_key(&md.name) {
             if let Some((n_l, dim)) = md.dims {
                 features.insert(
@@ -671,7 +717,6 @@ fn main() -> Result<()> {
         predictions = po.predictions.clone();
         n_pred_timesteps = predictions.len();
     } else if args.segment {
-        // Segment-based inference (always uses pure-Rust backend)
         let seg_config = SegmentConfig {
             duration_trs: args.segment_duration,
             overlap_trs: args.segment_overlap,
@@ -681,8 +726,10 @@ fn main() -> Result<()> {
             stride_drop_incomplete: false,
         };
 
-        let _ = &subject_ids;
-        let result = segments::predict_segmented(&model, &features, &seg_config);
+        let enc = encoder.as_mut().ok_or_else(|| {
+            anyhow::anyhow!("segment mode requires rust or rlx encoder (not burn-only)")
+        })?;
+        let result = segments::predict_segmented(enc, &features, &seg_config);
         eprintln!(
             "Segments: {} total TRs, {} kept ({:.1}%)",
             result.total_segments,
@@ -692,7 +739,6 @@ fn main() -> Result<()> {
         predictions = result.predictions;
         n_pred_timesteps = predictions.len();
     } else if use_burn {
-        // ── Burn backend forward pass ──────────────────────────────────
         let (preds, n_t) = run_burn_forward(
             &args.backend,
             &args.weights,
@@ -705,9 +751,10 @@ fn main() -> Result<()> {
         predictions = preds;
         n_pred_timesteps = n_t;
     } else {
-        // ── Pure-Rust forward pass ────────────────────────────────────
-        let output = model.forward(&features, subject_ids.as_deref(), true);
-        // output: [1, n_outputs, n_output_timesteps]
+        let enc = encoder.as_mut().ok_or_else(|| {
+            anyhow::anyhow!("no encoder loaded (use --backend rust or rlx)")
+        })?;
+        let output = enc.forward(&features, subject_ids.as_deref(), true);
         let n_out = output.shape[1];
         let n_t = output.shape[2];
         n_pred_timesteps = n_t;
@@ -1005,10 +1052,19 @@ fn main() -> Result<()> {
         eprintln!("Computing per-modality contribution maps...");
         std::fs::create_dir_all(maps_dir)?;
 
-        let contributions = model.modality_ablation(
-            &features,
-            subject_ids.as_deref(),
-        );
+        let ablation_src = encoder
+            .as_ref()
+            .and_then(|e| match e {
+                LoadedEncoder::Rust(m) => Some(m),
+                #[cfg(feature = "rlx-encoder")]
+                LoadedEncoder::Rlx(_) => None,
+            })
+            .or(rust_ref.as_ref());
+
+        let Some(model) = ablation_src else {
+            anyhow::bail!("--modality-maps requires --backend rust or burn (not RLX-only)");
+        };
+        let contributions = model.modality_ablation(&features, subject_ids.as_deref());
 
         for (modality, contrib) in &contributions {
             // Save as binary f32

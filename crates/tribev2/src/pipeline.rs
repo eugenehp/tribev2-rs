@@ -13,9 +13,9 @@
 //! - Audio → whisperX → word events → LLaMA features
 //!
 //! Feature extraction backends:
-//! - Text: LLaMA 3.2-3B via llama-cpp (always available)
-//! - Audio: Wav2Vec-BERT 2.0 via tribev2-audio burn crate (optional)
-//! - Video: V-JEPA2 ViT-G via tribev2-video burn crate (optional)
+//! - Text: LLaMA 3.2-3B via RLX / rlx-models (always available)
+//! - Audio: Wav2Vec-BERT 2.0 via tribev2-audio / RLX (feature `audio-rlx`)
+//! - Video: V-JEPA2 ViT-G via tribev2-video / RLX (feature `video-rlx`)
 //! - All modalities: pre-extracted binary features (always available)
 
 use std::collections::BTreeMap;
@@ -24,7 +24,7 @@ use anyhow::{Context, Result};
 
 use crate::events::{self, EventList};
 use crate::features::{self, LlamaFeatureConfig};
-use crate::model::tribe::TribeV2;
+use crate::brain_encoder::{BrainEncoder, LoadedEncoder};
 use crate::tensor::Tensor;
 
 /// Input specification for the pipeline.
@@ -40,6 +40,12 @@ pub struct PipelineInput {
     pub text: Option<String>,
     /// Path to LLaMA GGUF model (required for text feature extraction)
     pub llama_model: Option<String>,
+    /// Wav2Vec-BERT 2.0 weights (safetensors dir/file) for live audio extraction
+    #[cfg(feature = "audio-rlx")]
+    pub w2v_bert_weights: Option<String>,
+    /// V-JEPA2 weights for live video extraction
+    #[cfg(feature = "video-rlx")]
+    pub vjepa2_weights: Option<String>,
     /// Pre-extracted feature files (bypass extraction)
     pub text_features_path: Option<String>,
     pub audio_features_path: Option<String>,
@@ -198,7 +204,7 @@ pub fn get_duration(path: &str) -> Result<f64> {
 ///
 /// This is the main entry point — give it media files and get brain predictions.
 pub fn predict_from_media(
-    model: &TribeV2,
+    model: &mut LoadedEncoder,
     input: &PipelineInput,
     config: &PipelineConfig,
 ) -> Result<PipelineOutput> {
@@ -291,10 +297,11 @@ pub fn predict_from_media(
             let llama_cfg = LlamaFeatureConfig {
                 model_path: llama_path.clone(),
                 layer_positions: config.layer_positions.clone(),
-                n_layers: 28,
-                n_ctx: 2048,
-                frequency: config.frequency,
+                n_layers: Some(28),
+                ..LlamaFeatureConfig::default()
             };
+            let mut llama_cfg = llama_cfg;
+            llama_cfg.frequency = config.frequency;
             // Build prompt from word events
             let prompt: String = events.words().iter()
                 .map(|e| e.text.as_deref().unwrap_or(""))
@@ -314,18 +321,63 @@ pub fn predict_from_media(
     if let Some(ref path) = input.audio_features_path {
         let t = load_preextracted(path, 2, 1024, n_timesteps)?;
         features.insert("audio".to_string(), t);
+    } else {
+        #[cfg(feature = "audio-rlx")]
+        if let (Some(ref weights), Some(ref audio_path)) =
+            (&input.w2v_bert_weights, &input.audio_path)
+        {
+            eprintln!("Pipeline: extracting Wav2Vec-BERT audio features (RLX)...");
+            use tribev2_audio::{audio_io, extract_audio_features, AudioFeatureConfig};
+            let waveform = audio_io::load_audio(audio_path, 16_000)?;
+            let mut cfg = AudioFeatureConfig {
+                weights_path: weights.clone(),
+                ..AudioFeatureConfig::default()
+            };
+            cfg.frequency = config.frequency;
+            let audio_feats =
+                extract_audio_features(&cfg, &waveform, duration_secs, config.verbose)?;
+            let total_dim = audio_feats.n_layers * audio_feats.feature_dim;
+            features.insert(
+                "audio".to_string(),
+                Tensor::from_vec(
+                    audio_feats.data.clone(),
+                    vec![1, total_dim, audio_feats.n_timesteps],
+                ),
+            );
+        }
     }
-    // Note: live Wav2Vec-BERT extraction requires tribev2-audio crate
-    // which is optional. See extract_audio_features_burn() below.
 
     // Video features
     if let Some(ref path) = input.video_features_path {
         let t = load_preextracted(path, 2, 1408, n_timesteps)?;
         features.insert("video".to_string(), t);
+    } else {
+        #[cfg(feature = "video-rlx")]
+        if let (Some(ref weights), Some(ref video_path)) =
+            (&input.vjepa2_weights, &input.video_path)
+        {
+            eprintln!("Pipeline: extracting V-JEPA2 video features (RLX)...");
+            use tribev2_video::{extract_video_features, VideoFeatureConfig};
+            let mut cfg = VideoFeatureConfig {
+                weights_path: weights.clone(),
+                ..VideoFeatureConfig::default()
+            };
+            cfg.frequency = config.frequency;
+            let video_feats =
+                extract_video_features(&cfg, video_path, duration_secs, config.verbose)?;
+            let total_dim = video_feats.n_layers * video_feats.feature_dim;
+            features.insert(
+                "video".to_string(),
+                Tensor::from_vec(
+                    video_feats.data.clone(),
+                    vec![1, total_dim, video_feats.n_timesteps],
+                ),
+            );
+        }
     }
 
     // Fill missing modalities with zeros
-    for md in &model.feature_dims {
+    for md in model.feature_dims() {
         if !features.contains_key(&md.name) {
             if let Some((n_l, dim)) = md.dims {
                 features.insert(md.name.clone(), Tensor::zeros(&[1, n_l * dim, n_timesteps]));
@@ -358,7 +410,7 @@ pub fn predict_from_media(
 
 /// Pipeline for text-only input: text → TTS → audio → transcribe → features → predict.
 fn predict_from_text_string(
-    model: &TribeV2,
+    model: &mut LoadedEncoder,
     text: &str,
     input: &PipelineInput,
     config: &PipelineConfig,

@@ -1,0 +1,1 @@
+{"rlx_cpu":{"engine":"rlx","device":"cpu","mean_ms":33.8,"min_ms":32.2,"max_ms":35.4,"std_ms":1.6,"n_runs":2,"timesteps":10,"output_shape":[1,20484,100]}}

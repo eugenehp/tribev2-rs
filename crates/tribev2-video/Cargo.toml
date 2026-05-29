@@ -1,29 +1,33 @@
 [package]
 name = "tribev2-video"
-version = "0.0.4"
+version = "0.1.0"
 edition = "2021"
-description = "V-JEPA2 ViT-G video feature extraction for TRIBE v2 (burn backend)"
+description = "V-JEPA2 ViT-G video feature extraction for TRIBE v2 (RLX / rlx-models)"
 keywords = ["fmri", "video", "vjepa", "feature-extraction"]
 categories = ["science", "mathematics"]
 authors = ["Eugene Hauptmann"]
 license = "Apache-2.0"
+readme = "../../README.md"
 
 [features]
-default = ["ndarray"]
+default = []
 
-ndarray         = ["dep:burn-ndarray", "burn/ndarray"]
-blas-accelerate = ["burn-ndarray?/blas-accelerate"]
-wgpu            = ["burn/wgpu"]
-wgpu-metal      = ["wgpu", "burn-wgpu/metal"]
-wgpu-vulkan     = ["wgpu", "burn-wgpu/vulkan"]
+rlx-cpu   = ["rlx/cpu"]
+rlx-metal = ["rlx/metal", "rlx-vjepa2/metal"]
+rlx-cuda  = ["rlx/cuda", "rlx-vjepa2/cuda"]
+rlx-vulkan = ["rlx/gpu"]
+rlx-gpu   = ["rlx/gpu", "rlx-vjepa2/gpu"]
+rlx-rocm  = ["rlx/rocm", "rlx-vjepa2/rocm"]
+rlx-mlx   = ["rlx/mlx", "rlx-vjepa2/mlx"]
+apple-silicon = ["rlx-metal", "rlx-mlx", "rlx-gpu"]
+nvidia-gpu = ["rlx-cuda"]
 
 [dependencies]
-burn         = { version = "0.20.1", default-features = false, features = ["std", "simd"] }
-burn-ndarray = { version = "0.20.1", default-features = false, features = ["std", "simd", "multi-threads"], optional = true }
-burn-wgpu    = { version = "0.20.1", default-features = true, optional = true }
-safetensors  = "0.7"
-half         = { version = "2", features = ["bytemuck"] }
-serde        = { version = "1", features = ["derive"] }
-serde_json   = "1"
-anyhow       = "1.0"
-image        = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+rlx = { workspace = true, default-features = false }
+rlx-vjepa2 = { workspace = true }
+rlx-models-core = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1.0"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+tempfile = "3"

@@ -295,7 +295,8 @@ fn test_predict_segmented_small() {
         remove_empty_segments: false,
         ..Default::default()
     };
-    let result = segments::predict_segmented(&model, &features, &seg_cfg);
+    let mut model = model;
+    let result = segments::predict_segmented(&mut model, &features, &seg_cfg);
     assert!(result.predictions.len() > 0);
     assert_eq!(result.predictions[0].len(), 4);
 }

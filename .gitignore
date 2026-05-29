@@ -1,13 +1,44 @@
 target/
-data/
+scripts/rig/local.env
+bench/rig/
+
+# ── Weights & checkpoints (never commit) ─────────────────────────
 *.safetensors
+*.safetensors.*
 *.ckpt
+*.ckpt.*
 *.gguf
+*.gguf.*
+*.pt
+*.pth
+*.onnx
+weights/
+**/models/*.safetensors
+**/models/*.safetensors.*
+
+# ── data/ — download weights locally; see data/README.md ────────
+data/*
+!data/README.md
+!data/config.yaml
+!data/build_args.json
+
+# Large generated tensors under data/
+data/parity_refs/
+data/e2e_output/
+data/fsaverage*/
+
+# ── Other large binaries ─────────────────────────────────────────
 *.bin
+*.nii
+*.nii.gz
+
+# ── Images (allow figures + example plots) ─────────────────────
 *.png
 !figures/*.png
 !examples/outputs/**/*.png
+
 *.npy
 *.pyc
 __pycache__/
 .DS_Store
+._*

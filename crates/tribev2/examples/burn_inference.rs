@@ -8,7 +8,7 @@
 //! cargo run --example burn_inference
 //!
 //! # GPU (Metal)
-//! cargo run --example burn_inference --no-default-features --features wgpu-metal,llama-metal
+//! cargo run --example burn_inference --no-default-features --features wgpu-metal,rlx-metal
 //! ```
 
 use tribev2::config::*;

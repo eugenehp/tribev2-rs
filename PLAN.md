@@ -1,5 +1,7 @@
 # PLAN: Close Output/Prediction Gaps Between Python tribev2 and Rust tribev2-rs
 
+> **Benchmarks:** See [bench/README.md](bench/README.md) and [bench/summary.json](bench/summary.json). Burn and RLX are opt-in Cargo features (`default = []` on `tribev2`).
+
 ## Overview
 
 The Python `tribev2` codebase provides several output types and analysis capabilities that

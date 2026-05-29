@@ -29,40 +29,51 @@ Pure-Rust inference engine for [TRIBE v2](https://github.com/facebookresearch/tr
 tribev2-rs/
 ├── crates/
 │   ├── tribev2/              Core brain encoding model, CLI, features, plotting
-│   ├── tribev2-audio/        Wav2Vec-BERT 2.0 audio feature extraction (burn)
-│   └── tribev2-video/        V-JEPA2 ViT-G video feature extraction (burn)
+│   ├── tribev2-audio/        Wav2Vec-BERT 2.0 audio features (RLX, optional features)
+│   └── tribev2-video/        V-JEPA2 ViT-G video features (RLX, optional features)
+├── bench/
+│   ├── README.md             Benchmark tables + methodology (Burn vs RLX)
+│   ├── summary.json          Machine-readable latest sweep
+│   ├── results_*.json        Committed timing data
+│   ├── run_all_backends.sh   Local multi-build backend sweep
+│   └── run_cuda_rig.sh       CUDA-focused sweep (Linux / rig)
+├── rig.sh                    Remote Windows + WSL test/bench (like ../rlx/rig.sh)
 ├── scripts/
 │   ├── extract_llama_features.py   True per-layer LLaMA extraction (HuggingFace)
 │   ├── generate_parity_refs.py     Generate Python reference outputs for parity tests
-│   └── generate_full_parity_refs.py  Extended references (metrics, ROI, correlation)
+│   ├── generate_full_parity_refs.py  Extended references (metrics, ROI, correlation)
+│   ├── check_rlx_gpu_backends.sh   RLX CUDA/wgpu probe (Linux/WSL/Git Bash)
+│   └── rig/                  Remote rig config (local.env.example)
 ├── tests/
 │   ├── full_parity.rs        8-test Python↔Rust numeric parity suite
 │   └── burn_parity.rs        Cross-backend parity (CPU vs NdArray vs wgpu Metal)
-└── data/
-    ├── model.safetensors     Pretrained weights (from HuggingFace)
-    ├── config.yaml           Model configuration
-    ├── build_args.json       Feature dimensions, output shape
-    ├── fsaverage5/           FreeSurfer cortical surface meshes
-    └── parity_refs/          Python reference tensors for parity tests
+└── data/                     Local only — **weights are not in git** (see data/README.md)
+    ├── config.yaml           Model configuration (committed)
+    ├── build_args.json       Feature dimensions, output shape (committed)
+    ├── model.safetensors     Download via `tribev2-download` (~700 MB, gitignored)
+    ├── fsaverage5/           FreeSurfer meshes (gitignored)
+    └── parity_refs/          Parity refs (gitignored; regenerate via scripts/)
 ```
+
+**RLX backends** pull [`rlx`](https://crates.io/crates/rlx) and model crates ([`rlx-llama32`](https://crates.io/crates/rlx-llama32), [`rlx-wav2vec2-bert`](https://crates.io/crates/rlx-wav2vec2-bert), [`rlx-vjepa2`](https://crates.io/crates/rlx-vjepa2)) from crates.io — no sibling checkout required. The `rlx/mlx` feature still needs a git dependency on [MIT-RLX/rlx](https://github.com/MIT-RLX/rlx) because MLX is vendor-bundled and not on the index.
 
 ### Crate Overview
 
 | Crate | Description |
 |-------|-------------|
 | **`tribev2`** | FmriEncoderModel (pure-Rust + burn backends), weight loading, segment-based inference, events pipeline, brain surface plotting, NIfTI export, ROI analysis, evaluation metrics, MP4 video, CLI |
-| **`tribev2-audio`** | Wav2Vec-BERT 2.0 conformer encoder in burn — raw waveform → per-layer hidden states at 2 Hz |
-| **`tribev2-video`** | V-JEPA2 ViT-Giant in burn — video frames → 3D patch embedding → ViT layers → per-layer features at 2 Hz |
+| **`tribev2-audio`** | Wav2Vec-BERT 2.0 via RLX (`rlx-wav2vec2-bert`) — waveform → per-layer hidden states at 2 Hz |
+| **`tribev2-video`** | V-JEPA2 ViT-Giant via RLX (`rlx-vjepa2`) — video → per-layer features at 2 Hz |
 
 ## Features
 
 - **100% inference parity** with the Python implementation — every operation verified ([8 parity tests](#numeric-parity))
-- **Two backends** — pure-Rust (CPU) and burn (CPU/GPU via NdArray, wgpu Metal, Vulkan)
+- **Three encoder backends** (all opt-in via Cargo features) — pure-Rust `TribeV2` (always built), optional Burn (NdArray/wgpu), optional RLX (cpu/metal/mlx/cuda/…)
 - **Both backends load pretrained weights** from safetensors
 - **Multi-modal inference** — text, audio, and video features simultaneously
-- **Text feature extraction** — LLaMA 3.2-3B via llama-cpp (Rust) or HuggingFace (Python script for true per-layer extraction)
-- **Audio feature extraction** — Wav2Vec-BERT 2.0 in burn (16 kHz waveform → conformer hidden states)
-- **Video feature extraction** — V-JEPA2 ViT-G in burn (frames → 3D patch embedding → ViT hidden states)
+- **Text feature extraction** — LLaMA 3.2-3B via RLX / `rlx-llama32` (Rust) or HuggingFace (Python script)
+- **Audio feature extraction** — Wav2Vec-BERT 2.0 via RLX (16 kHz waveform → conformer hidden states)
+- **Video feature extraction** — V-JEPA2 ViT-G via RLX (frames → ViT hidden states)
 - **Segment-based batching** — long-form inference with configurable overlap
 - **Brain surface visualization** — SVG rendering on fsaverage5 cortical mesh (6 views, 6 colormaps, colorbars, RGB overlays, MP4 time series)
 - **Events pipeline** — whisperX transcription, ffmpeg audio extraction, sentence/context annotation
@@ -83,7 +94,7 @@ tribev2-rs/
 |--------|-------------|
 | `model/` | Pure-Rust forward pass (projectors, encoder, attention, ScaleNorm, RoPE, subject layers) |
 | `model_burn/` | Burn-generic forward pass (same architecture, GPU-capable via wgpu Metal/Vulkan) |
-| `features.rs` | LLaMA text feature extraction via llama-cpp |
+| `features.rs` | LLaMA text feature extraction via RLX (`rlx-llama32`) |
 | `segments.rs` | Segment-based batching with overlap and empty-segment removal |
 | `plotting.rs` | SVG brain surface rendering (6 views, 6 colormaps, multi-view, colorbars) |
 | `nifti.rs` | NIfTI-1 (.nii/.nii.gz) volumetric output with MNI152 affine |
@@ -120,12 +131,18 @@ The model combines feature extractors — **LLaMA 3.2** (text), **V-JEPA2** (vid
 
 ## Quick Start
 
+**Build:** `cargo build -p tribev2` uses **no optional features** by default — only the pure-Rust encoder and CLI. Enable Burn or RLX explicitly, e.g. `--features burn,wgpu-metal` or `--features rlx-encoder,rlx-metal`. Convenience bundle: `--features all-engines-cpu` (rust + Burn NdArray + RLX CPU).
+
 ### 1. Download weights
+
+Weights (`*.safetensors`, checkpoints, `parity_refs/`) are **gitignored** — clone the repo, then fetch data locally:
 
 ```bash
 cargo run --bin tribev2-download --features hf-download -- \
   --repo eugenehp/tribev2 --output ./data
 ```
+
+See **[data/README.md](data/README.md)** for layout and conversion from `.ckpt`.
 
 ### 2. Run inference
 
@@ -178,7 +195,7 @@ cargo run --release --bin tribev2-infer -- \
 
 ### 4. True per-layer LLaMA features (exact Python parity)
 
-The llama-cpp backend extracts final-layer embeddings only. For true per-layer
+The RLX backend exports per-layer hidden states in one prefill pass. For HuggingFace
 hidden states matching the Python pipeline:
 
 ```bash
@@ -246,48 +263,44 @@ let output = model.forward(vec![("text", text), ("audio", audio), ("video", vide
 // output: [1, 20484, 100]
 ```
 
-## Audio Feature Extraction (tribev2-audio)
+## Audio Feature Extraction (tribev2-audio, RLX)
 
-```rust
-use tribev2_audio::{Wav2VecBertConfig, Wav2VecBertWithConfig};
-use tribev2_audio::audio_io::load_audio;
-use tribev2_audio::weights::{WeightStore, load_wav2vec_bert_weights};
+Build with an RLX device feature (none enabled by default):
 
-type B = burn::backend::NdArray;
-let device = Default::default();
-let config = Wav2VecBertConfig::default();  // facebook/w2v-bert-2.0
-
-let mut model = Wav2VecBertWithConfig::<B>::new(&config, &device);
-
-// Load HuggingFace weights
-let mut ws = WeightStore::from_safetensors("w2v-bert-2.0/model.safetensors")?;
-load_wav2vec_bert_weights(&mut ws, &mut model, &device)?;
-
-// Extract features
-let waveform = load_audio("audio.wav", 16000)?;
-let features = model.extract_features(&waveform, 60.0, &device);
-// features: [3, 1024, 120] at 2 Hz
+```bash
+cargo build -p tribev2-audio --features rlx-metal   # Apple Silicon
+cargo build -p tribev2-audio --features rlx-cuda    # NVIDIA
 ```
 
-## Video Feature Extraction (tribev2-video)
+```rust
+use tribev2_audio::{audio_io, extract_audio_features, AudioFeatureConfig};
+
+let cfg = AudioFeatureConfig {
+    weights_path: "w2v-bert-2.0/model.safetensors".into(),
+    device: "metal".into(),
+    ..AudioFeatureConfig::default()
+};
+let waveform = audio_io::load_audio("audio.wav", 16_000)?;
+let feats = extract_audio_features(&cfg, &waveform, 60.0, false)?;
+// feats.shape ≈ [3, 1024, 120] at 2 Hz
+```
+
+Enable live extraction in the main crate: `cargo build -p tribev2 --features audio-rlx`.
+
+## Video Feature Extraction (tribev2-video, RLX)
 
 ```rust
-use tribev2_video::{VJepa2Config, VJepa2WithConfig};
-use tribev2_video::video_io;
-use tribev2_video::weights::{WeightStore, load_vjepa2_weights};
+use tribev2_video::{extract_video_features, VideoFeatureConfig};
 
-type B = burn::backend::NdArray;
-let device = Default::default();
-let config = VJepa2Config::default();  // facebook/vjepa2-vitg-fpc64-256
-
-let mut model = VJepa2WithConfig::<B>::new(&config, &device);
-
-let mut ws = WeightStore::from_safetensors("vjepa2/model.safetensors")?;
-load_vjepa2_weights(&mut ws, &mut model, &device)?;
-
-// Extract frames and run model
-// (see tribev2-video docs for full frame preprocessing pipeline)
+let cfg = VideoFeatureConfig {
+    weights_path: "vjepa2/model.safetensors".into(),
+    device: "metal".into(),
+    ..VideoFeatureConfig::default()
+};
+let feats = extract_video_features(&cfg, "clip.mp4", 30.0, false)?;
 ```
+
+Enable in pipeline: `cargo build -p tribev2 --features video-rlx`.
 
 ## Pretrained Model Details
 
@@ -308,58 +321,146 @@ load_vjepa2_weights(&mut ws, &mut model, &device)?;
 
 ## Feature Flags
 
+**Defaults: none.** `cargo build -p tribev2` does not enable Burn, RLX, or GPU stacks. The pure-Rust encoder (`TribeV2`) is **always compiled** — no feature flag required for inference with `--backend rust` / `cpu`.
+
+| Goal | Example `--features` |
+|------|----------------------|
+| Minimal (default) | *(omit)* |
+| CPU engine comparison | `pure-rust,all-engines-cpu` |
+| Apple Silicon GPU | `burn,wgpu-metal`, `rlx-encoder,rlx-metal` |
+| NVIDIA GPU | `burn,wgpu`, `rlx-encoder,rlx-cuda` |
+| Full text + audio RLX | `rlx`, `rlx-metal`, `audio-rlx` |
+
+Use `./bench/run_all_backends.sh` to benchmark each backend in a separate cargo build. Full flag list: **[docs/FEATURES.md](docs/FEATURES.md)**.
+
+Publish to crates.io: **[scripts/publish.sh](scripts/publish.sh)** (`doctor` → `dry-run` → `publish`). See **[docs/PUBLISHING.md](docs/PUBLISHING.md)**.
+
+### Encoder engines (opt-in)
+
 | Flag | Description |
 |------|-------------|
-| `ndarray` | Burn NdArray CPU backend (default) |
+| `pure-rust` | Marker for bench/CI; core `TribeV2` builds without it |
+| `burn` | Burn encoder (`TribeV2Burn`) + NdArray matmul |
+| `rlx-encoder` | RLX compiled-graph encoder (`TribeRlx`) |
+| `rlx-text` | LLaMA feature extraction via `rlx-llama32` (implies `rlx-encoder`) |
+| `rlx` | Shorthand for `rlx-encoder` + `rlx-text` |
+| `all-engines-cpu` | `pure-rust` + `burn` + `rlx-encoder` + `rlx-cpu` |
+
+### Burn device features (require `burn`)
+
+| Flag | Description |
+|------|-------------|
+| `burn-cpu` / `ndarray` | Burn NdArray CPU |
 | `blas-accelerate` | + Apple Accelerate BLAS |
-| `wgpu` | Burn wgpu backend (auto-detects Metal/Vulkan/DX12) |
-| `wgpu-metal` | + native Metal MSL shaders |
-| `wgpu-metal-f16` | + Metal f16 dtype (WMMA) |
-| `wgpu-kernels-metal` | + fused CubeCL kernels (fastest macOS) |
-| `wgpu-vulkan` | + Vulkan SPIR-V shaders |
-| `llama-metal` | Metal GPU for LLaMA (default) |
-| `llama-cuda` | CUDA for LLaMA |
-| `llama-vulkan` | Vulkan for LLaMA |
-| `hf-download` | HuggingFace Hub download support |
+| `wgpu` | Burn wgpu (auto Metal/Vulkan/DX12) |
+| `wgpu-metal` | Native Metal |
+| `wgpu-metal-f16` | Metal f16 (WMMA) |
+| `wgpu-kernels-metal` | Fused CubeCL kernels (fastest macOS Burn) |
+| `wgpu-vulkan` | Vulkan |
+| `apple-silicon` | `rlx-metal` + `rlx-mlx` + `burn` + `wgpu-metal` |
+| `nvidia-gpu` | `rlx-cuda` + `burn` + `wgpu` |
+
+### RLX device features (require `rlx-encoder`)
+
+| Flag | Device |
+|------|--------|
+| `rlx-cpu` | CPU |
+| `rlx-metal` / `rlx-mps` | Apple Metal (MPS) |
+| `rlx-mlx` | Apple MLX |
+| `rlx-cuda` | NVIDIA CUDA |
+| `rlx-rocm` | AMD ROCm |
+| `rlx-gpu` / `rlx-vulkan` | wgpu (Vulkan/Metal/DX12) |
+
+### Other
+
+| Flag | Description |
+|------|-------------|
+| `audio-rlx` / `video-rlx` | Live Wav2Vec-BERT / V-JEPA2 extractors |
+| `hf-download` | HuggingFace Hub download CLI |
+
+### CLI backends (`tribev2-infer --backend`)
+
+| Value | Engine |
+|-------|--------|
+| `rust`, `cpu` | Pure-Rust (default) |
+| `burn`, `burn-cpu`, `burn-gpu` | Burn (needs `burn` + `wgpu` for GPU) |
+| `rlx`, `rlx-cpu`, `rlx-metal`, `rlx-mps`, `rlx-mlx`, `rlx-cuda`, `rlx-rocm`, `rlx-wgpu` | RLX encoder |
+| `metal`, `mps`, `mlx`, `cuda`, `rocm`, `wgpu` | RLX shorthand |
 
 ## Benchmarks
 
-Apple M4 Pro, 10 cores, 64 GB RAM. Full forward pass: 1152-d, 8-layer transformer, 20,484 outputs, T=20 input → 100 output timesteps, 3 modalities.
+Full methodology, raw JSON, and reproduction commands: **[bench/README.md](bench/README.md)** · **[bench/summary.json](bench/summary.json)**
 
-### Forward Pass Only
+Apple M4 Pro · encoder forward · output `[1, 20484, 100]` · features from `data/build_args.json`.
+
+### Burn vs RLX — latest sweep (T=10, May 2026)
+
+| Backend | Engine | Device | Mean (ms) | vs Rust |
+|---------|--------|--------|----------:|--------:|
+| pure-Rust | rust | cpu | 1333.5 | 1.0× |
+| RLX | rlx | cpu | 33.8 | 39.5× |
+| Burn | burn | ndarray + Accelerate | 66.7 | 20.0× |
+| RLX | rlx | **metal** | 15.1 | 88.3× |
+| Burn | burn | wgpu-metal (f32) | 13.6 | 98.1× |
+| **Burn** | burn | **wgpu-metal-f16** | **10.6** | **125.8×** |
+
+On Apple Silicon, **Burn wgpu Metal (f16)** is fastest (~11 ms); **RLX Metal** (~15 ms) is the best RLX path (use `rlx-metal`, not `rlx-wgpu`). RLX loads pretrained weights; Burn bench uses random-init (same graph size).
+
+### Pipeline run (T=20, includes I/O)
 
 | Backend | Forward (ms) | Speedup |
 |---------|----------:|--------:|
-| Pure-Rust CPU | 3,028 | 1× |
+| pure-Rust CPU | 3,028 | 1× |
 | Burn NdArray CPU | 355 | 8.5× |
-| **Burn wgpu Metal GPU** | **36** | **84×** |
+| Burn wgpu Metal (warm GPU) | **36** | **84×** |
 
-### Full Pipeline (forward + all output types)
+### Historical (T=100)
 
-| Component | CPU | Burn CPU | Burn GPU |
-|---|---:|---:|---:|
-| Weight load | 810 ms | 1,380 ms | 1,115 ms |
-| **Forward pass** | **3,028 ms** | **355 ms** | **773 ms**\* |
-| NIfTI (96³×100, smoothed) | 7,538 ms | 7,533 ms | 7,086 ms |
-| ROI + metrics + corr map | <1 ms | <1 ms | <1 ms |
-| **Total** | **11,455 ms** | **10,908 ms** | **9,246 ms** |
-
-\*GPU forward is 773ms including CPU→GPU data transfer; 36ms warm with data on device.
-
-### Historical Benchmarks (T=100)
-
-| Backend | Mean (ms) | Speedup |
-|---------|----------:|--------:|
+| Backend | Mean (ms) | vs naive Rust |
+|---------|----------:|--------------:|
 | Rust CPU (naive) | 14,516 | 1× |
-| Burn NdArray | 316 | 46× |
 | Burn NdArray + Accelerate | 143 | 102× |
-| Rust CPU + Accelerate | 73 | 199× |
-| **Burn wgpu Metal + fused kernels** | **16.8** | **864×** |
+| **Burn wgpu Metal + fused CubeCL** | **16.8** | **864×** |
 
 ```bash
-cargo run --release --example bench_burn
-cargo run --release --example bench_burn --no-default-features --features wgpu-kernels-metal,llama-metal
+export TRIBEV2_DATA_DIR="${TRIBEV2_DATA_DIR:-./data}"
+
+# One build, selected engines
+cargo run --release -p tribev2 --example bench_encoder \
+  --no-default-features --features pure-rust,rlx-encoder,rlx-metal,burn,wgpu-metal \
+  -- --engines all --timesteps 50 --warmup 2 --runs 5
+
+# Full sweep (separate cargo build per backend)
+./bench/run_all_backends.sh
+
+# CUDA on Linux / NVIDIA rig
+./bench/run_cuda_rig.sh
+./rig.sh --both bench-cuda && ./rig.sh report-cuda
 ```
+
+### Remote CUDA rig (Windows + WSL)
+
+For an NVIDIA Windows host with WSL2 (same layout as [`../rlx/rig.sh`](../rlx/rig.sh)):
+
+```bash
+cp scripts/rig/local.env.example scripts/rig/local.env   # RIG_HOST, SSH_KEY
+./rig.sh probe                    # GPU + repo on Windows and Ubuntu WSL
+./rig.sh sync && ./rig.sh sync-data
+./rig.sh setup-wsl-rust           # once: rustup inside WSL
+./rig.sh --both bench-cuda        # CPU + RLX CUDA on MSVC and WSL
+./rig.sh fetch-bench && ./rig.sh report-cuda
+```
+
+| Command | What it does |
+|---------|----------------|
+| `bench-cuda` | Runs `bench/run_cuda_rig.sh` — rust CPU, RLX CPU, RLX CUDA (+ wgpu) per runtime |
+| `bench` | Full `./bench/run_all_backends.sh` on each runtime |
+| `report-cuda` | Table: **Windows vs WSL** mean forward ms (`rlx/cuda`, `rlx/cpu`, `rust/cpu`) |
+| `test-cuda` | RLX CUDA parity test (`rlx_parity`) when `data/parity_refs` present |
+
+Results land in `bench/rig/<tag>_windows/` and `bench/rig/<tag>_wsl/` as JSON (`bench/results_*.json` copies). WSL needs the [CUDA toolkit inside Ubuntu](https://docs.nvidia.com/cuda/wsl-user-guide/index.html) (`libcublas.so`) for RLX CUDA; Windows MSVC uses the driver-bundled CUDA DLLs.
+
+On the rig itself (no SSH): `scripts/check_rlx_gpu_backends.sh` or `scripts/check_rlx_gpu_backends.ps1`.
 
 ## Numeric Parity
 
@@ -406,7 +507,7 @@ All output types (predictions, ROI summaries, correlation maps, metrics, top-k r
 # Run cross-backend parity tests
 cargo test --release -p tribev2 --test burn_parity -- --nocapture
 cargo test --release -p tribev2 --test burn_parity \
-  --no-default-features --features wgpu-metal,llama-metal -- --nocapture
+  --no-default-features --features burn,wgpu-metal,rlx-encoder,rlx-metal -- --nocapture
 ```
 
 ## Output Formats
@@ -430,15 +531,20 @@ cargo test --release -p tribev2 --test burn_parity \
 ### Backend Selection
 
 ```bash
-# Pure-Rust CPU (default — single-threaded, no dependencies)
+# Pure-Rust CPU (default build — no extra --features)
 cargo run --release --bin tribev2-infer -- --backend cpu ...
 
-# Burn NdArray CPU (multi-threaded, ~10× faster)
-cargo run --release --bin tribev2-infer -- --backend burn-cpu ...
-
-# Burn wgpu Metal GPU (~84× faster forward pass, Apple Silicon)
+# Burn NdArray CPU
 cargo run --release --bin tribev2-infer --no-default-features \
-  --features wgpu-metal,llama-metal -- --backend burn-gpu ...
+  --features burn,ndarray -- --backend burn-cpu ...
+
+# Burn wgpu Metal GPU (Apple Silicon)
+cargo run --release --bin tribev2-infer --no-default-features \
+  --features burn,wgpu-metal -- --backend burn-gpu ...
+
+# RLX Metal encoder
+cargo run --release --bin tribev2-infer --no-default-features \
+  --features rlx-encoder,rlx-metal -- --backend rlx-metal ...
 
 # End-to-end: video → predictions (auto-extracts audio, transcribes, extracts features)
 cargo run --release --bin tribev2-infer -- \

@@ -1,0 +1,18 @@
+{
+  "feature_dims": {
+    "text": [
+      2,
+      3072
+    ],
+    "audio": [
+      2,
+      1024
+    ],
+    "video": [
+      2,
+      1408
+    ]
+  },
+  "n_outputs": 20484,
+  "n_output_timesteps": 100
+}

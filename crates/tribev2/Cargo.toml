@@ -1,6 +1,6 @@
 [package]
 name = "tribev2"
-version = "0.0.4"
+version = "0.1.0"
 edition = "2021"
 description = "TRIBE v2 — multimodal fMRI brain encoding model inference in Rust"
 keywords = ["fmri", "neuroscience", "multimodal", "brain-encoding", "llama"]
@@ -38,62 +38,112 @@ path = "examples/multimodal_predict.rs"
 [[example]]
 name = "burn_inference"
 path = "examples/burn_inference.rs"
+required-features = ["burn"]
 
 [[example]]
 name = "bench_rust"
 path = "bench/bench_rust.rs"
+required-features = ["pure-rust"]
 
 [[example]]
 name = "bench_burn"
 path = "bench/bench_burn.rs"
+required-features = ["burn"]
+
+[[example]]
+name = "bench_encoder"
+path = "bench/bench_encoder.rs"
+
+[[example]]
+name = "check_rlx_devices"
+path = "examples/check_rlx_devices.rs"
+required-features = ["rlx-encoder"]
 
 [[example]]
 name = "profile_burn"
 path = "bench/profile_burn.rs"
+required-features = ["burn"]
+
+[[test]]
+name = "burn_parity"
+path = "tests/burn_parity.rs"
+required-features = ["burn", "burn-cpu"]
+
+[[test]]
+name = "rlx_parity"
+path = "tests/rlx_parity.rs"
+required-features = ["rlx-encoder", "rlx-cpu"]
 
 [features]
-default = ["ndarray", "llama-metal"]
+# No optional engines enabled by default. Core `TribeV2` (pure-Rust) always builds.
+default = []
 
-# ── Burn CPU backends ─────────────────────────────────────────
-ndarray         = ["dep:burn-ndarray", "burn/ndarray"]
-blas-accelerate = ["burn-ndarray?/blas-accelerate"]
+# ── Inference engines (all opt-in) ────────────────────────────
+pure-rust = []
+burn = ["dep:burn", "dep:burn-ndarray", "burn/ndarray"]
+rlx-encoder = ["dep:rlx"]
+rlx-text = ["rlx-encoder", "dep:rlx-models-core", "dep:rlx-flow", "dep:rlx-llama32"]
+rlx = ["rlx-encoder", "rlx-text"]
+# Convenience: CPU baselines for rust + burn ndarray + rlx cpu (no GPU stacks).
+all-engines-cpu = ["pure-rust", "burn", "rlx-encoder", "rlx-cpu"]
 
-# ── Burn GPU backend (wgpu) ───────────────────────────────────
-wgpu            = ["burn/wgpu"]
-wgpu-metal      = ["wgpu", "burn-wgpu/metal"]
-wgpu-metal-f16  = ["wgpu-metal"]
+# ── Burn backends (require `burn`) ────────────────────────────
+burn-cpu = []
+ndarray = ["burn-cpu"]
+blas-accelerate = ["burn", "burn-ndarray?/blas-accelerate"]
+wgpu = ["burn", "dep:burn-wgpu", "burn/wgpu"]
+wgpu-metal = ["wgpu", "burn-wgpu/metal"]
+wgpu-metal-f16 = ["wgpu-metal"]
 wgpu-kernels-metal = ["wgpu-metal", "dep:cubecl", "dep:burn-cubecl", "dep:burn-backend"]
-wgpu-vulkan     = ["wgpu", "burn-wgpu/vulkan"]
+wgpu-vulkan = ["wgpu", "burn-wgpu/vulkan"]
 
-# ── llama-cpp GPU acceleration ────────────────────────────────
-llama-cuda   = ["llama-cpp-4/cuda"]
-llama-metal  = ["llama-cpp-4/metal"]
-llama-vulkan = ["llama-cpp-4/vulkan"]
+# ── RLX device backends (require `rlx-encoder`; text uses `rlx-text`) ──
+rlx-cpu = ["rlx-encoder", "rlx/cpu"]
+rlx-metal = ["rlx-encoder", "rlx/metal", "rlx-llama32?/metal", "tribev2-audio?/rlx-metal", "tribev2-video?/rlx-metal"]
+rlx-mps = ["rlx-metal"]
+rlx-cuda = ["rlx-encoder", "rlx/cuda", "rlx-llama32?/cuda", "tribev2-audio?/rlx-cuda", "tribev2-video?/rlx-cuda"]
+rlx-vulkan = ["rlx-encoder", "rlx/gpu", "rlx-llama32?/vulkan", "tribev2-audio?/rlx-vulkan", "tribev2-video?/rlx-vulkan"]
+rlx-gpu = ["rlx-encoder", "rlx/gpu", "rlx-llama32?/gpu", "tribev2-audio?/rlx-gpu", "tribev2-video?/rlx-gpu"]
+# Encoder-only RLX backends (no rlx-llama32 / text stack) — use for CI and Win/WSL probes.
+rlx-gpu-enc = ["rlx-encoder", "rlx/gpu"]
+rlx-cuda-enc = ["rlx-encoder", "rlx/cuda"]
+rlx-rocm = ["rlx-encoder", "rlx/rocm", "rlx-llama32?/rocm", "tribev2-audio?/rlx-rocm", "tribev2-video?/rlx-rocm"]
+rlx-mlx = ["rlx-encoder", "rlx/mlx", "rlx-llama32?/mlx", "tribev2-audio?/rlx-mlx", "tribev2-video?/rlx-mlx"]
+apple-silicon = ["rlx-metal", "rlx-mlx", "rlx-gpu", "burn", "wgpu-metal"]
+nvidia-gpu = ["rlx-cuda", "burn", "wgpu"]
+
+audio-rlx = ["rlx-text", "dep:tribev2-audio"]
+video-rlx = ["rlx-text", "dep:tribev2-video"]
 
 # ── Utilities ─────────────────────────────────────────────────
 hf-download = ["dep:hf-hub"]
-accelerate  = []
+accelerate = []
 
 [dependencies]
-burn         = { version = "0.20.1", default-features = false, features = ["std", "simd"] }
+burn = { version = "0.20.1", default-features = false, features = ["std", "simd"], optional = true }
 burn-ndarray = { version = "0.20.1", default-features = false, features = ["std", "simd", "multi-threads"], optional = true }
-burn-wgpu    = { version = "0.20.1", default-features = true, optional = true }
-cubecl       = { version = "0.9", features = ["wgpu"], optional = true }
-burn-cubecl  = { version = "0.20.1", optional = true }
+burn-wgpu = { version = "0.20.1", default-features = true, optional = true }
+cubecl = { version = "0.9", features = ["wgpu"], optional = true }
+burn-cubecl = { version = "0.20.1", optional = true }
 burn-backend = { version = "0.20.1", optional = true }
-llama-cpp-4  = { version = "0.3.0", default-features = false }
-safetensors  = "0.7"
-half         = { version = "2", features = ["bytemuck"] }
-serde        = { version = "1", features = ["derive"] }
-serde_json   = "1"
-serde_yaml   = "0.9"
-clap         = { version = "4", features = ["derive", "env"] }
-anyhow       = "1.0"
-bytemuck     = { version = "1", features = ["derive"] }
-tracing      = "0.1"
-hf-hub       = { version = "0.5", default-features = false, features = ["ureq"], optional = true }
-tempfile     = "3"
-flate2       = "1.0"
+rlx = { workspace = true, default-features = false, optional = true }
+rlx-models-core = { workspace = true, optional = true }
+rlx-flow = { workspace = true, optional = true }
+rlx-llama32 = { workspace = true, features = ["tokenizer"], optional = true }
+tribev2-audio = { workspace = true, optional = true }
+tribev2-video = { workspace = true, optional = true }
+safetensors = "0.7"
+half = { version = "2", features = ["bytemuck"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+clap = { version = "4", features = ["derive", "env"] }
+anyhow = "1.0"
+bytemuck = { version = "1", features = ["derive"] }
+tracing = "0.1"
+hf-hub = { version = "0.5", default-features = false, features = ["ureq"], optional = true }
+tempfile = "3"
+flate2 = "1.0"
 
 [build-dependencies]
 cc = "1.2"

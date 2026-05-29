@@ -2,7 +2,7 @@
 //!
 //! Usage:
 //!   cargo run --release --example profile_burn --features blas-accelerate
-//!   cargo run --release --example profile_burn --no-default-features --features wgpu-metal,llama-metal
+//!   cargo run --release --example profile_burn --no-default-features --features wgpu-metal,rlx-metal
 
 use std::time::Instant;
 use burn::prelude::*;

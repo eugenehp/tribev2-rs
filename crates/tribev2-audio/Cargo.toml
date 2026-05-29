@@ -1,31 +1,35 @@
 [package]
 name = "tribev2-audio"
-version = "0.0.4"
+version = "0.1.0"
 edition = "2021"
-description = "Wav2Vec-BERT 2.0 audio feature extraction for TRIBE v2 (burn backend)"
+description = "Wav2Vec-BERT 2.0 audio feature extraction for TRIBE v2 (RLX / rlx-models)"
 keywords = ["fmri", "audio", "wav2vec", "feature-extraction"]
 categories = ["science", "mathematics"]
 authors = ["Eugene Hauptmann"]
 license = "Apache-2.0"
+readme = "../../README.md"
 
 [features]
-default = ["ndarray"]
+default = []
 
-ndarray         = ["dep:burn-ndarray", "burn/ndarray"]
-blas-accelerate = ["burn-ndarray?/blas-accelerate"]
-wgpu            = ["burn/wgpu"]
-wgpu-metal      = ["wgpu", "burn-wgpu/metal"]
-wgpu-vulkan     = ["wgpu", "burn-wgpu/vulkan"]
+rlx-cpu   = ["rlx/cpu"]
+rlx-metal = ["rlx/metal", "rlx-wav2vec2-bert/metal"]
+rlx-cuda  = ["rlx/cuda", "rlx-wav2vec2-bert/cuda"]
+rlx-vulkan = ["rlx/gpu"]
+rlx-gpu   = ["rlx/gpu", "rlx-wav2vec2-bert/gpu"]
+rlx-rocm  = ["rlx/rocm", "rlx-wav2vec2-bert/rocm"]
+rlx-mlx   = ["rlx/mlx", "rlx-wav2vec2-bert/mlx"]
+apple-silicon = ["rlx-metal", "rlx-mlx", "rlx-gpu"]
+nvidia-gpu = ["rlx-cuda"]
 
 [dependencies]
-burn         = { version = "0.20.1", default-features = false, features = ["std", "simd"] }
-burn-ndarray = { version = "0.20.1", default-features = false, features = ["std", "simd", "multi-threads"], optional = true }
-burn-wgpu    = { version = "0.20.1", default-features = true, optional = true }
-safetensors  = "0.7"
-half         = { version = "2", features = ["bytemuck"] }
-serde        = { version = "1", features = ["derive"] }
-serde_json   = "1"
-anyhow       = "1.0"
-hound        = "3.5"
-rubato       = "0.16"
-tempfile     = "3"
+rlx = { workspace = true, default-features = false }
+rlx-wav2vec2-bert = { workspace = true }
+rlx-models-core = { workspace = true }
+rlx-flow = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1.0"
+hound = "3.5"
+rubato = "0.16"
+tempfile = "3"

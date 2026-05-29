@@ -1,0 +1,1 @@
+{"rust_cpu":{"engine":"rust","device":"cpu","mean_ms":1333.5,"min_ms":1326.9,"max_ms":1340.1,"std_ms":6.6,"n_runs":2,"timesteps":10,"output_shape":[1,20484,100]}}

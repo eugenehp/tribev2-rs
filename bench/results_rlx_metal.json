@@ -1,0 +1,1 @@
+{"rlx_metal":{"engine":"rlx","device":"metal","mean_ms":15.1,"min_ms":14.6,"max_ms":15.5,"std_ms":0.4,"n_runs":2,"timesteps":10,"output_shape":[1,20484,100]}}

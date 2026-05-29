@@ -267,6 +267,13 @@ impl TribeV2 {
         self.aggregate_features_with_subjects(features, None)
     }
 
+    /// Run combiner, time embedding, and x-transformers encoder.
+    /// Input/return layout: `[B, T, H]`.
+    pub fn forward_encoder(&self, features: &BTreeMap<String, Tensor>) -> Tensor {
+        let x = self.aggregate_features(features);
+        self.transformer_forward(&x, None)
+    }
+
     /// Aggregate features with explicit subject IDs.
     pub fn aggregate_features_with_subjects(
         &self,

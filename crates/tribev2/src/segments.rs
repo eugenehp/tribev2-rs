@@ -20,8 +20,9 @@
 //! ```
 
 use std::collections::BTreeMap;
+
+use crate::brain_encoder::BrainEncoder;
 use crate::tensor::Tensor;
-use crate::model::tribe::TribeV2;
 
 /// A segment of features with temporal metadata.
 #[derive(Debug, Clone)]
@@ -174,12 +175,12 @@ fn slice_features(
 ///
 /// `features`: map from modality name → tensor [1, L*D, T] (batch=1, concatenated layers,
 ///   T = total timesteps). Features should already be at the model's expected frequency.
-/// `model`: the TRIBE v2 model.
+/// `model`: any [`BrainEncoder`] implementation (pure-Rust, RLX, …).
 /// `config`: segment configuration.
 ///
 /// Returns per-TR predictions as [n_kept_trs, n_outputs].
-pub fn predict_segmented(
-    model: &TribeV2,
+pub fn predict_segmented<M: BrainEncoder>(
+    model: &mut M,
     features: &BTreeMap<String, Tensor>,
     config: &SegmentConfig,
 ) -> SegmentedPrediction {
@@ -254,8 +255,8 @@ pub fn predict_segmented(
 ///
 /// Returns predictions as [n_segments, n_outputs, n_output_timesteps],
 /// one entry per segment (not per TR).
-pub fn predict_segments_batched(
-    model: &TribeV2,
+pub fn predict_segments_batched<M: BrainEncoder>(
+    model: &mut M,
     features: &BTreeMap<String, Tensor>,
     config: &SegmentConfig,
 ) -> Vec<(Tensor, Segment)> {

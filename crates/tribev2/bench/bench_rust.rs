@@ -85,7 +85,11 @@ fn main() {
     println!("=== Rust CPU ({backend}) ===");
 
     let config = pretrained_config();
-    let feature_dims = ModalityDims::pretrained();
+    let feature_dims = vec![
+        ModalityDims::new("text", 2, 3072),
+        ModalityDims::new("audio", 2, 1024),
+        ModalityDims::new("video", 2, 1408),
+    ];
     let model = TribeV2::new(feature_dims, 20484, 100, &config);
     let features = make_input(100);
 

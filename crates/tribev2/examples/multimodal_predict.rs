@@ -83,7 +83,8 @@ fn main() -> anyhow::Result<()> {
     };
 
     let t0 = std::time::Instant::now();
-    let result = predict_segmented(&model, &features, &seg_config);
+    let mut model = model;
+    let result = predict_segmented(&mut model, &features, &seg_config);
     let elapsed = t0.elapsed();
 
     println!("   Total TRs: {}", result.total_segments);

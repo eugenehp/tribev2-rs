@@ -5,13 +5,13 @@
 //!   cargo run --release --example bench_burn --features blas-accelerate
 //!
 //! GPU (macOS Metal, f32):
-//!   cargo run --release --example bench_burn --no-default-features --features wgpu-metal,llama-metal
+//!   cargo run --release --example bench_burn --no-default-features --features wgpu-metal,rlx-metal
 //!
 //! GPU (macOS Metal, f16 — recommended, uses Metal WMMA for ~2x faster matmuls):
-//!   cargo run --release --example bench_burn --no-default-features --features wgpu-metal-f16,llama-metal
+//!   cargo run --release --example bench_burn --no-default-features --features wgpu-metal-f16,rlx-metal
 //!
 //! GPU (macOS Metal, fused CubeCL kernels — fused RoPE + ScaleNorm, no fusion wrapper):
-//!   cargo run --release --example bench_burn --no-default-features --features wgpu-kernels-metal,llama-metal
+//!   cargo run --release --example bench_burn --no-default-features --features wgpu-kernels-metal,rlx-metal
 //!
 //! GPU (Linux/Windows Vulkan):
 //!   cargo run --release --example bench_burn --no-default-features --features wgpu-vulkan

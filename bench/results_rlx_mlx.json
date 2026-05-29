@@ -1,0 +1,1 @@
+{"rlx_mlx":{"engine":"rlx","device":"mlx","mean_ms":45.7,"min_ms":35.1,"max_ms":56.4,"std_ms":10.7,"n_runs":2,"timesteps":10,"output_shape":[1,20484,100]}}

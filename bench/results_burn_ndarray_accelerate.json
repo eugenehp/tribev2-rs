@@ -1,0 +1,1 @@
+{"burn_ndarray_accelerate":{"engine":"burn","device":"burn/ndarray-accelerate","mean_ms":66.7,"min_ms":66.1,"max_ms":67.4,"std_ms":0.7,"n_runs":2,"timesteps":10,"output_shape":[1,20484,100]}}

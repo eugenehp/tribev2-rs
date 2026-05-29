@@ -173,7 +173,8 @@ fn test_e2e_multimodal_inference() {
         stride_drop_incomplete: false,
     };
 
-    let seg_result = predict_segmented(&model, &features, &seg_config);
+    let mut model = model;
+    let seg_result = predict_segmented(&mut model, &features, &seg_config);
     let seg_ms = t2.elapsed().as_millis();
 
     eprintln!("   Segmented inference: {}ms", seg_ms);

@@ -1,15 +1,28 @@
-# TRIBE v2 Forward Pass Benchmark
+# TRIBE v2 encoder benchmarks
 
-**Setup:** batch=1, T=100, 3 modalities (text/audio/video), 20 484 cortical vertices
+Canonical tables live in **[bench/README.md](../bench/README.md)** with raw JSON under **`bench/results_*.json`** and **`bench/summary.json`**.
 
-| Backend | Mean (ms) | Min (ms) | Std (ms) | vs CPU naive |
-|---------|----------:|---------:|---------:|-------------:|
-| Rust CPU (naive loops) | 14516.5 | 14350.2 | 278.4 | 1× |
-| Burn NdArray (Rayon) | 316.2 | 289.2 | 36.3 | 46× |
-| Burn NdArray + Accelerate | 142.7 | 134.5 | 8.6 | 102× |
-| Rust CPU + Accelerate BLAS | 73.1 | 71.9 | 0.9 | 199× |
-| Python CPU (1 thread) | 57.6 | 56.0 | 0.9 | 252× |
-| Burn wgpu Metal f32 | 22.6 | 21.0 | 1.9 | 642× |
-| Burn wgpu Metal f16 | 20.5 | 19.1 | 1.4 | 708× |
-| Burn wgpu Metal f32 + fused kernels | 16.8 | 15.8 | 1.1 | 864× |
-| Python MPS GPU | 12.2 | 11.6 | 0.6 | 1192× |
+## T=100 historical (forward only)
+
+**Setup:** batch=1, T=100, 3 modalities, 20,484 vertices (3-layer feature layout in older runs).
+
+| Backend | Mean (ms) | vs Rust naive |
+|---------|----------:|--------------:|
+| Rust CPU (naive loops) | 14,516.5 | 1× |
+| Burn NdArray (Rayon) | 316.2 | 46× |
+| Burn NdArray + Accelerate | 142.7 | 102× |
+| Rust CPU + Accelerate BLAS | 73.1 | 199× |
+| Burn wgpu Metal f32 | 22.6 | 642× |
+| Burn wgpu Metal f16 | 20.5 | 708× |
+| **Burn wgpu Metal + fused CubeCL** | **16.8** | **864×** |
+
+## T=10 sweep (May 2026, checkpoint `build_args.json`)
+
+| Backend | Mean (ms) |
+|---------|----------:|
+| pure-Rust CPU | 1333.5 |
+| RLX CPU | 33.8 |
+| Burn NdArray + Accelerate | 66.7 |
+| RLX Metal | 15.1 |
+| Burn wgpu Metal f32 | 13.6 |
+| **Burn wgpu Metal f16** | **10.6** |

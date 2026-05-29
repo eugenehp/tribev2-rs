@@ -1,0 +1,34 @@
+{
+  "description": "TRIBE v2 encoder forward benchmarks (mean_ms). See bench/README.md.",
+  "sweeps": {
+    "2026-05_apple_silicon_T10": {
+      "host": "Apple M4 Pro",
+      "timesteps": 10,
+      "warmup": 1,
+      "runs": 2,
+      "feature_dims": "data/build_args.json (2 layers per modality)",
+      "results": {
+        "rust_cpu": { "engine": "rust", "device": "cpu", "mean_ms": 1333.5, "file": "bench/results_rust_cpu.json" },
+        "burn_ndarray": { "engine": "burn", "device": "burn/ndarray", "mean_ms": 163.9, "file": "bench/results_burn_ndarray.json" },
+        "burn_ndarray_accelerate": { "engine": "burn", "device": "burn/ndarray-accelerate", "mean_ms": 66.7, "file": "bench/results_burn_ndarray_accelerate.json" },
+        "burn_wgpu_metal": { "engine": "burn", "device": "burn/wgpu-metal", "mean_ms": 13.6, "file": "bench/results_burn_wgpu_metal.json" },
+        "burn_wgpu_metal_f16": { "engine": "burn", "device": "burn/wgpu-metal-f16", "mean_ms": 10.6, "file": "bench/results_burn_wgpu_metal_f16.json" },
+        "rlx_cpu": { "engine": "rlx", "device": "cpu", "mean_ms": 33.8, "file": "bench/results_rlx_cpu.json" },
+        "rlx_metal": { "engine": "rlx", "device": "metal", "mean_ms": 15.1, "file": "bench/results_rlx_metal.json" },
+        "rlx_mlx": { "engine": "rlx", "device": "mlx", "mean_ms": 45.7, "file": "bench/results_rlx_mlx.json" },
+        "rlx_wgpu": { "engine": "rlx", "device": "wgpu", "mean_ms": 75.8, "file": "bench/results_rlx_wgpu.json" }
+      },
+      "burn_vs_rlx_gpu": {
+        "fastest_burn_ms": 10.6,
+        "fastest_rlx_ms": 15.1,
+        "winner": "burn/wgpu-metal-f16",
+        "rlx_best_device": "metal"
+      }
+    },
+    "historical_T100_metal_kernels": {
+      "timesteps": 100,
+      "burn_wgpu_metal_kernels_mean_ms": 16.8,
+      "file": "crates/tribev2/bench/results_rust_burn_wgpu_metal_kernels.json"
+    }
+  }
+}

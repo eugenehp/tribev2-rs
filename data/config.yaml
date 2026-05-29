@@ -1,0 +1,619 @@
+infra:
+    folder: /checkpoint/sdascoli/results/tribe_release/half_depth/brain_model_config.subject_layers.subject_dropout=0.10,data.study.names=(Algonauts2025Bold,Lahner2024Bold,Lebel2023Bold,Wen2017)-ecdd89b2
+    cluster: auto
+    logs: '{folder}/logs/{user}/%j'
+    job_name: brain_model_config.subject_layers.subject_dropout=0.10,data.study.names=(Algonauts2025Bold,Lahner2024Bold,Lebel2023Bold,Wen2017)-ecdd89b2
+    timeout_min: 4320
+    nodes: 1
+    tasks_per_node: 1
+    cpus_per_task: 20
+    gpus_per_node: 1
+    mem_gb: 128.0
+    max_pickle_size_gb: null
+    slurm_constraint: volta32gb
+    slurm_partition: learnfair
+    slurm_account: null
+    slurm_qos: null
+    slurm_use_srun: false
+    slurm_additional_parameters: null
+    conda_env: null
+    workdir:
+        copied:
+        - neuralset
+        - neuraltrain
+        - neuralhub
+        - tribe
+        folder: null
+        log_commit: false
+        includes:
+        - '*.py'
+        - '*.txt'
+        excludes: !!python/tuple
+        - __pycache__
+        - .git
+    permissions: 511
+    version: '1'
+    mode: retry
+    keep_in_ram: false
+data:
+    study:
+        infra: null
+        names:
+        - Algonauts2025Bold
+        - Lahner2024Bold
+        - Lebel2023Bold
+        - Wen2017
+        path: /large_experiments/brainai/shared/studies
+        transforms:
+            extractaudio:
+                infra: null
+                overwrite: false
+                name: ExtractAudioFromVideo
+            extractwords:
+                infra: null
+                language: english
+                overwrite: false
+                name: ExtractWordsFromAudio
+            addtext:
+                infra: null
+                name: AddText
+            addsentence:
+                infra: null
+                max_unmatched_ratio: 0.05
+                override_sentences: false
+                name: AddSentenceToWords
+            addcontext:
+                infra: null
+                sentence_only: false
+                max_context_len: 1024
+                split_field: ''
+                name: AddContextToWords
+            removemissing:
+                infra: null
+                event_types: Word
+                field: context
+                name: RemoveMissing
+            chunksounds:
+                infra: null
+                event_type_to_chunk: Audio
+                event_type_to_use: null
+                min_duration: 30.0
+                max_duration: 60.0
+                name: ChunkEvents
+            chunkvideos:
+                infra:
+                    folder: !!python/object/apply:pathlib.PosixPath
+                    - /
+                    - checkpoint
+                    - sdascoli
+                    - cache
+                    - tribe_release
+                    cache_type: ValidatedParquet
+                    mode: cached
+                    keep_in_ram: false
+                    backend: Cached
+                event_type_to_chunk: Video
+                event_type_to_use: null
+                min_duration: 30.0
+                max_duration: 60.0
+                name: ChunkEvents
+            query:
+                infra: null
+                query: null
+                name: QueryEvents
+            split:
+                infra: null
+                val_ratio: 0.1
+                name: SplitEvents
+        query: null
+        studies_to_include: null
+        infra_timelines:
+            folder: /checkpoint/sdascoli/cache/tribe_release
+            cluster: processpool
+            logs: '{folder}/logs/{user}/%j'
+            job_name: null
+            timeout_min: 720
+            nodes: 1
+            tasks_per_node: 1
+            cpus_per_task: null
+            gpus_per_node: null
+            mem_gb: null
+            max_pickle_size_gb: null
+            slurm_constraint: null
+            slurm_partition: null
+            slurm_account: null
+            slurm_qos: null
+            slurm_use_srun: false
+            slurm_additional_parameters: null
+            conda_env: null
+            workdir: null
+            permissions: 511
+            version: final
+            keep_in_ram: true
+            max_jobs: 1024
+            min_samples_per_job: 4
+            forbid_single_item_computation: false
+            mode: cached
+        name: MultiStudyLoader
+    neuro:
+        event_types: Fmri
+        aggregation: single
+        allow_missing: true
+        frequency: 1.0
+        offset: 5.0
+        projection:
+            mesh: fsaverage5
+            radius: 3.0
+            interpolation: linear
+            kind: ball
+            n_samples: null
+            mask_img: null
+            depth: null
+            center_depth: 0.5
+            extract_fsaverage_from_mni: true
+            name: TribeSurfaceProjector
+        cleaning:
+            standardize: zscore_sample
+            detrend: true
+            high_pass: null
+            low_pass: null
+            filter: null
+            ensure_finite: true
+        padding: null
+        input_space: null
+        fwhm: null
+        infra:
+            folder: /checkpoint/sdascoli/cache/tribe_release
+            cluster: slurm
+            logs: '{folder}/logs/{user}/%j'
+            job_name: null
+            timeout_min: 720
+            nodes: 1
+            tasks_per_node: 1
+            cpus_per_task: 10
+            gpus_per_node: 1
+            mem_gb: null
+            max_pickle_size_gb: null
+            slurm_constraint: volta32gb
+            slurm_partition: scavenge
+            slurm_account: null
+            slurm_qos: null
+            slurm_use_srun: false
+            slurm_additional_parameters: null
+            conda_env: null
+            workdir: null
+            permissions: 511
+            version: release
+            keep_in_ram: true
+            max_jobs: 256
+            min_samples_per_job: 1
+            forbid_single_item_computation: false
+            mode: cached
+        name: FmriExtractor
+    text_feature:
+        model_name: meta-llama/Llama-3.2-3B
+        device: cuda
+        layers:
+        - 0.5
+        - 0.75
+        - 1.0
+        cache_all_layers: false
+        cache_n_layers: 20
+        layer_aggregation: group_mean
+        token_aggregation: mean
+        event_types: Word
+        aggregation: sum
+        allow_missing: true
+        frequency: 2.0
+        infra:
+            folder: /checkpoint/sdascoli/cache/tribe_release
+            cluster: slurm
+            logs: '{folder}/logs/{user}/%j'
+            job_name: null
+            timeout_min: 720
+            nodes: 1
+            tasks_per_node: 1
+            cpus_per_task: 10
+            gpus_per_node: 1
+            mem_gb: null
+            max_pickle_size_gb: null
+            slurm_constraint: volta32gb
+            slurm_partition: scavenge
+            slurm_account: null
+            slurm_qos: null
+            slurm_use_srun: false
+            slurm_additional_parameters: null
+            conda_env: null
+            workdir: null
+            permissions: 511
+            version: release
+            keep_in_ram: true
+            max_jobs: 256
+            min_samples_per_job: 32
+            forbid_single_item_computation: false
+            mode: cached
+        batch_size: 4
+        contextualized: true
+        pretrained: true
+        name: HuggingFaceText
+    image_feature:
+        event_types: Video
+        aggregation: sum
+        allow_missing: true
+        frequency: 2.0
+        image:
+            model_name: facebook/dinov2-large
+            device: cuda
+            layers: 0.6666666666666666
+            cache_all_layers: false
+            cache_n_layers: 20
+            layer_aggregation: mean
+            token_aggregation: mean
+            event_types: Image
+            aggregation: single
+            allow_missing: false
+            frequency: 0.0
+            batch_size: 2
+            imsize: null
+            pretrained: true
+            infra:
+                folder: null
+                cluster: null
+                logs: '{folder}/logs/{user}/%j'
+                job_name: null
+                timeout_min: 25
+                nodes: 1
+                tasks_per_node: 1
+                cpus_per_task: 8
+                gpus_per_node: 1
+                mem_gb: null
+                max_pickle_size_gb: null
+                slurm_constraint: null
+                slurm_partition: null
+                slurm_account: null
+                slurm_qos: null
+                slurm_use_srun: false
+                slurm_additional_parameters: null
+                conda_env: null
+                workdir: null
+                permissions: 511
+                version: v5
+                keep_in_ram: false
+                max_jobs: 128
+                min_samples_per_job: 4096
+                forbid_single_item_computation: false
+                mode: cached
+            name: HuggingFaceImage
+        use_audio: true
+        clip_duration: null
+        max_imsize: null
+        layer_type: ''
+        num_frames: null
+        infra:
+            folder: /checkpoint/sdascoli/cache/tribe_release
+            cluster: slurm
+            logs: '{folder}/logs/{user}/%j'
+            job_name: null
+            timeout_min: 1440
+            nodes: 1
+            tasks_per_node: 1
+            cpus_per_task: 10
+            gpus_per_node: 1
+            mem_gb: null
+            max_pickle_size_gb: null
+            slurm_constraint: volta32gb
+            slurm_partition: scavenge
+            slurm_account: null
+            slurm_qos: null
+            slurm_use_srun: false
+            slurm_additional_parameters: null
+            conda_env: null
+            workdir: null
+            permissions: 511
+            version: release
+            keep_in_ram: true
+            max_jobs: 1024
+            min_samples_per_job: 1
+            forbid_single_item_computation: false
+            mode: cached
+        name: HuggingFaceVideo
+    audio_feature:
+        model_name: facebook/w2v-bert-2.0
+        device: cuda
+        layers:
+        - 0.5
+        - 0.75
+        - 1.0
+        cache_all_layers: false
+        cache_n_layers: 20
+        layer_aggregation: group_mean
+        token_aggregation: mean
+        event_types: Audio
+        aggregation: sum
+        allow_missing: true
+        frequency: 2.0
+        norm_audio: true
+        infra:
+            folder: /checkpoint/sdascoli/cache/tribe_release
+            cluster: slurm
+            logs: '{folder}/logs/{user}/%j'
+            job_name: null
+            timeout_min: 720
+            nodes: 1
+            tasks_per_node: 1
+            cpus_per_task: 10
+            gpus_per_node: 1
+            mem_gb: null
+            max_pickle_size_gb: null
+            slurm_constraint: volta32gb
+            slurm_partition: scavenge
+            slurm_account: null
+            slurm_qos: null
+            slurm_use_srun: false
+            slurm_additional_parameters: null
+            conda_env: null
+            workdir: null
+            permissions: 511
+            version: release
+            keep_in_ram: true
+            max_jobs: 256
+            min_samples_per_job: 1
+            forbid_single_item_computation: false
+            mode: cached
+        normalized: true
+        layer_type: transformer
+        name: Wav2VecBert
+    video_feature:
+        event_types: Video
+        aggregation: sum
+        allow_missing: true
+        frequency: 2.0
+        image:
+            model_name: facebook/vjepa2-vitg-fpc64-256
+            device: cuda
+            layers:
+            - 0.5
+            - 0.75
+            - 1.0
+            cache_all_layers: false
+            cache_n_layers: 20
+            layer_aggregation: group_mean
+            token_aggregation: mean
+            event_types: Image
+            aggregation: single
+            allow_missing: false
+            frequency: 0.0
+            batch_size: 8
+            imsize: null
+            pretrained: true
+            infra:
+                folder: null
+                cluster: null
+                logs: '{folder}/logs/{user}/%j'
+                job_name: null
+                timeout_min: 25
+                nodes: 1
+                tasks_per_node: 1
+                cpus_per_task: 8
+                gpus_per_node: 1
+                mem_gb: null
+                max_pickle_size_gb: null
+                slurm_constraint: null
+                slurm_partition: null
+                slurm_account: null
+                slurm_qos: null
+                slurm_use_srun: false
+                slurm_additional_parameters: null
+                conda_env: null
+                workdir: null
+                permissions: 511
+                version: v5
+                keep_in_ram: false
+                max_jobs: 128
+                min_samples_per_job: 4096
+                forbid_single_item_computation: false
+                mode: cached
+            name: HuggingFaceImage
+        use_audio: true
+        clip_duration: 4.0
+        max_imsize: null
+        layer_type: ''
+        num_frames: null
+        infra:
+            folder: /checkpoint/sdascoli/cache/tribe_release
+            cluster: slurm
+            logs: '{folder}/logs/{user}/%j'
+            job_name: null
+            timeout_min: 1440
+            nodes: 1
+            tasks_per_node: 1
+            cpus_per_task: 10
+            gpus_per_node: 1
+            mem_gb: null
+            max_pickle_size_gb: null
+            slurm_constraint: volta32gb
+            slurm_partition: scavenge
+            slurm_account: null
+            slurm_qos: null
+            slurm_use_srun: false
+            slurm_additional_parameters: null
+            conda_env: null
+            workdir: null
+            permissions: 511
+            version: release
+            keep_in_ram: true
+            max_jobs: 1024
+            min_samples_per_job: 1
+            forbid_single_item_computation: false
+            mode: cached
+        name: HuggingFaceVideo
+    subject_id:
+        event_types: Event
+        aggregation: first
+        allow_missing: true
+        frequency: 0.0
+        event_field: subject
+        treat_missing_as_separate_class: false
+        return_one_hot: false
+        predefined_mapping:
+            Algonauts2025Bold/sub-01: 0
+            Algonauts2025Bold/sub-02: 1
+            Algonauts2025Bold/sub-03: 2
+            Algonauts2025Bold/sub-05: 3
+            Lahner2024Bold/1: 4
+            Lahner2024Bold/10: 5
+            Lahner2024Bold/2: 6
+            Lahner2024Bold/3: 7
+            Lahner2024Bold/4: 8
+            Lahner2024Bold/5: 9
+            Lahner2024Bold/6: 10
+            Lahner2024Bold/7: 11
+            Lahner2024Bold/8: 12
+            Lahner2024Bold/9: 13
+            Lebel2023Bold/UTS01: 14
+            Lebel2023Bold/UTS02: 15
+            Lebel2023Bold/UTS03: 16
+            Lebel2023Bold/UTS04: 17
+            Lebel2023Bold/UTS05: 18
+            Lebel2023Bold/UTS06: 19
+            Lebel2023Bold/UTS07: 20
+            Lebel2023Bold/UTS08: 21
+            Wen2017/subject1: 22
+            Wen2017/subject2: 23
+            Wen2017/subject3: 24
+        name: LabelEncoder
+    frequency: 2.0
+    features_to_use:
+    - text
+    - audio
+    - video
+    features_to_mask: []
+    n_layers_to_use: null
+    layers_to_use:
+    - 0.5
+    - 0.75
+    - 1.0
+    layer_aggregation: group_mean
+    duration_trs: 100
+    overlap_trs_train: 0
+    overlap_trs_val: 0
+    batch_size: 8
+    num_workers: 20
+    shuffle_train: true
+    shuffle_val: true
+    stride_drop_incomplete: false
+    split_segments_by_time: false
+seed: 33
+brain_model_config:
+    projector:
+        input_size: null
+        hidden_sizes: null
+        norm_layer: layer
+        activation_layer: gelu
+        bias: true
+        dropout: 0.0
+        name: Mlp
+    combiner: null
+    encoder:
+        heads: 8
+        depth: 8
+        cross_attend: false
+        causal: false
+        attn_flash: false
+        attn_dropout: 0.0
+        ff_mult: 4
+        ff_dropout: 0.0
+        use_scalenorm: true
+        use_rmsnorm: false
+        rel_pos_bias: false
+        alibi_pos_bias: false
+        rotary_pos_emb: true
+        rotary_xpos: false
+        residual_attn: false
+        scale_residual: true
+        layer_dropout: 0.0
+        name: TransformerEncoder
+    time_pos_embedding: true
+    subject_embedding: false
+    subject_layers:
+        n_subjects: 25
+        bias: true
+        init_id: false
+        average_subjects: false
+        mode: gather
+        subject_dropout: 0.1
+        name: SubjectLayers
+    hidden: 1152
+    max_seq_len: 1024
+    dropout: 0.0
+    extractor_aggregation: cat
+    layer_aggregation: cat
+    linear_baseline: false
+    modality_dropout: 0.3
+    temporal_dropout: 0.0
+    low_rank_head: 2048
+    temporal_smoothing: null
+    name: FmriEncoder
+loss:
+    kwargs:
+        reduction: none
+    name: MSELoss
+optim:
+    optimizer:
+        lr: 0.0001
+        kwargs:
+            weight_decay: 0.0
+        name: Adam
+    scheduler:
+        kwargs:
+            max_lr: 0.0001
+            pct_start: 0.1
+        name: OneCycleLR
+    interval: step
+    name: LightningOptimizer
+metrics:
+-   log_name: pearson
+    dim: 0
+    reduction: mean
+    torchmetrics_kwargs: null
+    name: OnlinePearsonCorr
+-   log_name: subj_pearson
+    metric_name: OnlinePearsonCorr
+    kwargs:
+        dim: 0
+    name: GroupedMetric
+-   log_name: retrieval_top1
+    topk: 1
+    name: TopkAcc
+monitor: val/pearson
+wandb_config:
+    name: brain_model_config.subject_layers.subject_dropout=0.10,data.study.names=(Algonauts2025Bold,Lahner2024Bold,Lebel2023Bold,Wen2017)-ecdd89b2
+    group: half_depth
+    entity: sdascoli
+    project: tribe_release
+    offline: false
+    host: https://fairwandb.org
+    id: null
+    dir: null
+    anonymous: null
+    log_model: false
+    experiment: null
+    prefix: ''
+    resume: allow
+accelerator: gpu
+n_epochs: 15
+max_steps: -1
+patience: null
+limit_train_batches: null
+accumulate_grad_batches: 1
+enable_progress_bar: true
+log_every_n_steps: 5
+fast_dev_run: false
+save_checkpoints: true
+checkpoint_filename: best
+resize_subject_layer: false
+freeze_backbone: false
+average_subjects: false
+checkpoint_path: null
+load_checkpoint: true
+test_only: false

@@ -6,6 +6,17 @@ members = [
 ]
 resolver = "2"
 
+[workspace.dependencies]
+# https://crates.io/crates/rlx and https://crates.io/crates/rlx-models-core
+rlx = { version = "0.2.1", default-features = false }
+rlx-flow = { version = "0.2.1" }
+rlx-models-core = { version = "0.2.0" }
+rlx-llama32 = { version = "0.2.0" }
+rlx-wav2vec2-bert = { version = "0.2.0" }
+rlx-vjepa2 = { version = "0.2.0" }
+tribev2-audio = { version = "0.1.0", path = "crates/tribev2-audio", default-features = false }
+tribev2-video = { version = "0.1.0", path = "crates/tribev2-video", default-features = false }
+
 [profile.release]
 opt-level = 3
 lto = "thin"

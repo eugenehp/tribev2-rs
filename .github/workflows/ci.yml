@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test-lib:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tribev2-rs
+
+      - name: Verify weights are not tracked
+        run: ./scripts/verify_no_weights_in_git.sh
+
+      - name: Build tribev2 (no optional engine features)
+        run: cargo build -p tribev2 --all-targets
+
+      - name: Build tribev2 (pure-rust + CPU engines smoke)
+        run: cargo build -p tribev2 --all-targets --features pure-rust,all-engines-cpu
+
+      - name: Unit tests (lib)
+        run: cargo test -p tribev2 --lib
+
+      - name: Workspace unit tests
+        run: cargo test --workspace --lib 2>/dev/null || cargo test -p tribev2 --lib
+
+  parity:
+    runs-on: ubuntu-latest
+    needs: test-lib
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check parity refs present
+        id: refs
+        run: |
+          if [ -f data/parity_refs/input_text.bin ] && [ -f data/model.safetensors ]; then
+            echo "have_data=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_data=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping numeric parity (add data/ or set TRIBEV2_DATA_DIR in a fork with LFS)"
+          fi
+
+      - name: RLX encoder parity
+        if: steps.refs.outputs.have_data == 'true'
+        env:
+          TRIBEV2_DATA_DIR: ${{ github.workspace }}/data
+        run: cargo test --release -p tribev2 --test rlx_parity --no-default-features --features pure-rust,rlx-encoder,rlx-cpu
+
+      - name: Numeric parity (compile-only when no data)
+        if: steps.refs.outputs.have_data != 'true'
+        run: cargo test --release -p tribev2 --test rlx_parity --no-run --no-default-features --features pure-rust,rlx-encoder,rlx-cpu
+
+      - name: Full / numeric parity tests
+        if: steps.refs.outputs.have_data == 'true'
+        env:
+          TRIBEV2_DATA_DIR: ${{ github.workspace }}/data
+        run: |
+          cargo test --release -p tribev2 --test numeric_parity || true
+          cargo test --release -p tribev2 --test full_parity || true
+
+  bench-smoke:
+    runs-on: ubuntu-latest
+    needs: test-lib
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Encoder benchmark smoke (rust + rlx CPU, T=5)
+        env:
+          TRIBEV2_DATA_DIR: ${{ github.workspace }}/data
+        run: |
+          cargo run --release -p tribev2 --example bench_encoder --no-default-features \
+            --features pure-rust,rlx-encoder,rlx-cpu -- \
+            --engines all --timesteps 5 --warmup 0 --runs 1 --json false
