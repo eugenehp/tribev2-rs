@@ -2,7 +2,9 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
+#[cfg(feature = "rlx-encoder")]
+use anyhow::Context;
 
 use crate::config::ModalityDims;
 use crate::model::tribe::TribeV2;
@@ -143,6 +145,7 @@ pub fn load_encoder(
     config_path: &str,
     weights_path: &str,
     build_args_path: Option<&str>,
+    #[cfg_attr(not(feature = "rlx-encoder"), allow(unused_variables))]
     rlx_device_label: Option<&str>,
 ) -> Result<LoadedEncoder> {
     match kind {

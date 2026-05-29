@@ -3,9 +3,10 @@
 mod parity_metrics;
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
-use parity_metrics::{compare_slices, log_top_diffs, pearson, ParityReport};
+use parity_metrics::{compare_slices, pearson, ParityReport};
+#[cfg(feature = "rlx-metal")]
+use parity_metrics::log_top_diffs;
 use tribev2::model::tribe::TribeV2;
 use tribev2::model_rlx::TribeRlx;
 use tribev2::tensor::Tensor;
@@ -807,6 +808,13 @@ fn test_rlx_lowrank_on_metal() {
     assert_parity(&rust_lr.data, &rlx_lr.data, "lowrank on metal");
 }
 
+#[cfg(any(
+    feature = "rlx-metal",
+    feature = "rlx-gpu",
+    feature = "rlx-gpu-enc",
+    feature = "rlx-cuda",
+    feature = "rlx-cuda-enc"
+))]
 fn device_forward_parity(device: rlx::Device, label: &str) {
     // Native full-graph forward (no CPU hybrid).
     if !refs_exist() {
@@ -984,7 +992,7 @@ fn test_rlx_lowrank_vs_pure_rust() {
     let (b, t, h) = (1usize, 20usize, 1152usize);
     x2 = x2.permute(&[0, 2, 1]);
     x2 = x2.permute(&[0, 2, 1]);
-    let rust_lr_on_rlx = x2
+    let _rust_lr_on_rlx = x2
         .reshape(&[b * t, h])
         .matmul(lr_w)
         .reshape(&[b, t, lr_w.shape[1]])
@@ -1007,8 +1015,6 @@ fn test_rlx_predictor_vs_pure_rust() {
     let input_text = load_ref("input_text.bin");
     let input_audio = load_ref("input_audio.bin");
     let input_video = load_ref("input_video.bin");
-    let ref_pred = load_ref_with_header("after_predictor.bin");
-
     let rust_model = TribeV2::from_pretrained(
         &data_path("config.yaml"),
         &data_path("model.safetensors"),
@@ -1020,6 +1026,7 @@ fn test_rlx_predictor_vs_pure_rust() {
     features.insert("audio".to_string(), input_audio.clone());
     features.insert("video".to_string(), input_video.clone());
     let rust_pred = rust_model.forward(&features, None, false);
+    let ref_pred = load_ref_with_header("after_predictor.bin");
 
     let mod_order: Vec<String> = rust_model.feature_dims.iter().map(|m| m.name.clone()).collect();
     let mut raw = load_safetensors(&data_path("model.safetensors")).unwrap();
@@ -1042,6 +1049,9 @@ fn test_rlx_predictor_vs_pure_rust() {
     let rlx_pred = Tensor::from_vec(pred_out[0].clone(), rust_pred.shape.clone());
 
     assert_parity(&rust_pred.data, &rlx_pred.data, "predictor vs rust");
+    let r_ref = compare_slices(&rust_pred.data, &ref_pred.data);
+    r_ref.log("predictor vs python ref");
+    assert!(r_ref.pearson > 0.999999, "predictor vs python ref");
 }
 
 #[test]

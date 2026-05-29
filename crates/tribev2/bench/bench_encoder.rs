@@ -14,6 +14,7 @@
 //! ```
 
 use std::collections::BTreeMap;
+#[cfg(any(feature = "pure-rust", feature = "burn", feature = "rlx-encoder"))]
 use std::time::Instant;
 
 use clap::Parser;
@@ -56,6 +57,7 @@ struct Args {
     list_engines: bool,
 }
 
+#[cfg(any(feature = "pure-rust", feature = "burn"))]
 fn pretrained_config() -> BrainModelConfig {
     BrainModelConfig {
         hidden: 1152,
@@ -127,6 +129,7 @@ fn make_features(t: usize, modality_dims: &[ModalityDims]) -> BTreeMap<String, T
     features
 }
 
+#[cfg(any(feature = "pure-rust", feature = "burn", feature = "rlx-encoder"))]
 fn stats(times: &[f64]) -> (f64, f64, f64, f64) {
     let mean = times.iter().sum::<f64>() / times.len() as f64;
     let min = times.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -135,6 +138,7 @@ fn stats(times: &[f64]) -> (f64, f64, f64, f64) {
     (mean, min, max, std)
 }
 
+#[cfg(any(feature = "pure-rust", feature = "burn", feature = "rlx-encoder"))]
 fn write_json(
     key: &str,
     engine: &str,
@@ -183,21 +187,29 @@ fn resolve_engine_tokens(spec: &str) -> Vec<String> {
             .collect();
     }
 
-    let mut out = Vec::new();
-    #[cfg(feature = "pure-rust")]
-    out.push("rust".into());
-
-    #[cfg(feature = "burn")]
-    out.push("burn".into());
-
-    #[cfg(feature = "rlx-encoder")]
+    #[cfg(any(feature = "pure-rust", feature = "burn", feature = "rlx-encoder"))]
     {
-        for label in tribev2::rlx_device::available_rlx_device_labels() {
-            out.push(format!("rlx-{label}"));
+        let mut out = Vec::new();
+        #[cfg(feature = "pure-rust")]
+        {
+            out.push("rust".into());
         }
+        #[cfg(feature = "burn")]
+        {
+            out.push("burn".into());
+        }
+        #[cfg(feature = "rlx-encoder")]
+        {
+            for label in tribev2::rlx_device::available_rlx_device_labels() {
+                out.push(format!("rlx-{label}"));
+            }
+        }
+        out
     }
-
-    out
+    #[cfg(not(any(feature = "pure-rust", feature = "burn", feature = "rlx-encoder")))]
+    {
+        Vec::new()
+    }
 }
 
 #[cfg(feature = "pure-rust")]
@@ -388,6 +400,7 @@ fn bench_rlx(
     Some((mean, min, max, std, key))
 }
 
+#[allow(unused_variables)]
 fn run_engine(
     engine: &str,
     args: &Args,

@@ -183,9 +183,6 @@ fn test_full_numeric_parity() {
     // The Rust aggregate output is [B, T, H] — same layout
     compare_tensors("after_cat", &agg, &ref_cat, 1e-4, 1e-3);
 
-    // Stage 4: After encoder
-    let ref_encoder = load_ref("after_encoder.bin");
-
     // Stage 7: Final output
     let ref_final = load_ref("final_output.bin");
 

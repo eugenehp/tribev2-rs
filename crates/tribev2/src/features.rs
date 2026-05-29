@@ -17,7 +17,10 @@
 //! hidden states at selected transformer layers (post-block, pre-final-norm),
 //! matching HuggingFace `output_hidden_states=True` behavior.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
+#[cfg(feature = "rlx-text")]
+use anyhow::Context;
+#[cfg(feature = "rlx-text")]
 use std::path::Path;
 
 use crate::tensor::Tensor;
@@ -108,6 +111,7 @@ pub fn compute_layer_indices(layer_positions: &[f64], n_total_layers: usize) -> 
         .collect()
 }
 
+#[cfg(feature = "rlx-text")]
 fn fill_layer_outputs(
     data: &mut [f32],
     layer_outputs: &[Vec<f32>],

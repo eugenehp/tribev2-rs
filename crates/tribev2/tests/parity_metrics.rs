@@ -98,6 +98,7 @@ pub fn compare_slices(x: &[f32], y: &[f32]) -> ParityReport {
 }
 
 /// Log the largest absolute diffs (for debugging GPU divergence).
+#[cfg(feature = "rlx-metal")]
 pub fn log_top_diffs(x: &[f32], y: &[f32], label: &str, n: usize) {
     let mut errs: Vec<(usize, f32)> = x
         .iter()

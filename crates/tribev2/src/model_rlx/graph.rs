@@ -142,7 +142,6 @@ fn self_attention(
 ) -> NodeId {
     let b = spec.b;
     let s = spec.t;
-    let d = spec.hidden;
     let nh = spec.n_heads;
     let dh = spec.dim_head;
     let h_total = nh * dh;
@@ -239,8 +238,6 @@ fn projector_branch(
 /// Projectors + concat + time embedding only (for parity debugging).
 pub fn build_tribe_cat_graph(spec: &TribeSpec, mod_order: &[String]) -> Graph {
     let mut g = Graph::new("tribe_v2_cat");
-    let t = spec.t;
-    let h = spec.hidden;
 
     let x = concat_modalities(&mut g, spec, mod_order);
     g.set_outputs(vec![x]);
